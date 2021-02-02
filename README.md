@@ -1,6 +1,6 @@
-# pyapi
+# wekalib
 
-A Python module that implements WekaIO's JSON RPC API for Weka Clusters
+A group of Python modules that implement some handy interfaces to Weka Clusters.
 
 class WekaCluster (wekacluster.py) - a high-level abstraction for a weka cluster.  WekaCluster.call_api() is the method for making API calls.  API calls are distributed across cluster backend hosts.  Error checking and retries automatically handled.
 
