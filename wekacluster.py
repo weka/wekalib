@@ -2,10 +2,10 @@
 from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
 import logging
 
-from wekaapi import WekaApi
-import wekaapi
-from wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, datetime_to_wekatime, datetime_to_lokitime
-from circular import circular_list
+from wekalib.wekaapi import WekaApi
+import wekalib.wekaapi as wekaapi
+from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, datetime_to_wekatime, datetime_to_lokitime
+from wekalib.circular import circular_list
 import traceback
 import urllib3
 import datetime
