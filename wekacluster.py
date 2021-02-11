@@ -201,8 +201,8 @@ class WekaCluster(object):
                 log.error(f"IO Stopped on Cluster {self}")
                 raise
             #<class 'wekaapi.HttpException'> error (502, 'Bad Gateway') - if we get this, leader failing over; wait a few secs and retry?
-            except wekaapi.HttpException as exc:
-                last_exception = exc
+            #except wekaapi.HttpException as exc:
+            #    last_exception = exc
             except Exception as exc:
                 last_exception = exc
                 self.cluster_in_progress -= 1
@@ -213,7 +213,7 @@ class WekaCluster(object):
                 if host == None:
                     break   # fall through to raise exception
                 self.errors += 1
-                log.error(f"cluster={self}, {type(exc)} error {exc} spawning command {method} on host {last_hostname}. Retrying on {host}.")
+                #log.error(f"cluster={self}, {type(exc)} error {exc} spawning command {method} on host {last_hostname}. Retrying on {host}.")
                 #print(traceback.format_exc())
                 continue
 
