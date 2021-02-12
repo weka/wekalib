@@ -355,7 +355,7 @@ class WekaApi():
             self._scheme, self._host, self._port, self._path = self._parse_url(response.getheader('Location'))
             log.debug( "redirection: {} moved to {}".format(oldhost, self._host) )
         else:
-            log.error(f"unknown error on {self._host}, status={response.status}, reason={response.reason}")
+            #log.error(f"unknown error on {self._host}, status={response.status}, reason={response.reason}")
             raise HttpException(response.status, response.reason)
 
 

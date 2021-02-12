@@ -55,7 +55,7 @@ class WekaHost(object):
             self.host_in_progress -= 1
             raise
         self.host_in_progress -= 1
-        log.debug(f"elapsed time for host {self.name}: {time.time() - start_time} secs")
+        log.debug(f"elapsed time for host {self.name}: {round(time.time() - start_time,2)} secs")
         return result
 
     def __str__(self):
@@ -213,7 +213,7 @@ class WekaCluster(object):
                 if host == None:
                     break   # fall through to raise exception
                 self.errors += 1
-                #log.error(f"cluster={self}, {type(exc)} error {exc} spawning command {method} on host {last_hostname}. Retrying on {host}.")
+                log.error(f"cluster={self}, {type(exc)} error {exc} spawning command {method} on host {last_hostname}. Retrying on {host}.")
                 #print(traceback.format_exc())
                 continue
 
