@@ -213,7 +213,7 @@ class WekaCluster(object):
                 if host == None:
                     break   # fall through to raise exception
                 self.errors += 1
-                log.error(f"cluster={self}, {type(exc)} error {exc} spawning command {method} on host {last_hostname}. Retrying on {host}.")
+                log.error(f"cluster={self}, error {exc} spawning command {method}/{parms} on host {last_hostname}. Retrying on {host}.")
                 #print(traceback.format_exc())
                 continue
 
