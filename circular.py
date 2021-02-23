@@ -1,4 +1,3 @@
-
 #
 # circular_list module - implement a circular list
 #
@@ -11,10 +10,11 @@ import logging
 
 log = getLogger(__name__)
 
+
 class circular_list():
     def __init__(self, list):
         # note: list is a [] kind of list
-        self._lock = Lock() # make it re-entrant (thread-safe)
+        self._lock = Lock()  # make it re-entrant (thread-safe)
         self.list = list
         self.current = 0
         log.debug("circular list created")
@@ -25,10 +25,10 @@ class circular_list():
         with self._lock:
             log.debug(f"before: {self._str()}")
             if len(self.list) == 0:
-                return None # nothing in the list
+                return None  # nothing in the list
             item = self.list[self.current]
             self.current += 1
-            if self.current >= len(self.list):    # cycle back to beginning
+            if self.current >= len(self.list):  # cycle back to beginning
                 self.current = 0
             log.debug(f"after: {self._str()}")
             return item
@@ -45,10 +45,10 @@ class circular_list():
         with self._lock:
             log.debug(f"removing {item}; before: {self._str()}")
             try:
-                self.list.remove(item)    # it's really a list [], so use the [].remove() method.
+                self.list.remove(item)  # it's really a list [], so use the [].remove() method.
             except ValueError:
                 log.debug(f"item {item} not in list")
-            if self.current >= len(self.list):    # did we remove the last one in the list?
+            if self.current >= len(self.list):  # did we remove the last one in the list?
                 self.current = 0
             log.debug(f"after: {self._str()}")
 
@@ -73,5 +73,3 @@ class circular_list():
     def __contains__(self, other):
         with self._lock:
             return other in self.list
-
-
