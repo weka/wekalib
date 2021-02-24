@@ -1,4 +1,3 @@
-
 #
 # signals module - handle typical signals
 #
@@ -6,18 +5,19 @@
 # author: Vince Fleming, vince@weka.io
 
 import signal
-#import syslog
+# import syslog
 import sys
-from logging import debug, getLogger
+from logging import getLogger
 
 log = getLogger(__name__)
 
+
 class signal_handling():
-    def __init__( self ):
+    def __init__(self):
         signal.signal(signal.SIGTERM, self.sigterm_handler)
         signal.signal(signal.SIGINT, self.sigint_handler)
         signal.signal(signal.SIGHUP, self.sighup_handler)
-        log.debug( "signal_handling: signal handlers set" )
+        log.debug("signal_handling: signal handlers set")
 
     @staticmethod
     def sigterm_handler(signal, frame):
