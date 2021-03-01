@@ -127,6 +127,7 @@ class WekaCluster(object):
         self.guid = api_return['guid']
         self.release = api_return['release']
 
+
         # ------------- end of __init__() -------------
 
     def __str__(self):

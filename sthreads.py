@@ -3,8 +3,7 @@
 #
 
 # author: Vince Fleming, vince@weka.io
-
-
+import functools
 import threading
 import time
 from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
@@ -30,14 +29,10 @@ class simul_threads():
         log.debug(f"object created; num_simultaneous={self.num_simultaneous}")
 
     # create a thread and put it in the list of threads
-    def new(self, function, funcargs=None):
-        log.debug(f"creating new thread, func={function}, funcargs={funcargs}")
-        # log.debug( traceback.print_stack() )
+    def new(self, function, *args, **kwargs):
+        log.debug(f"creating new thread, func={function}")
         self.ids += 1
-        if funcargs is None:
-            self.staged[self.ids] = threading.Thread(target=function)
-        else:
-            self.staged[self.ids] = threading.Thread(target=function, args=funcargs)
+        self.staged[self.ids] = threading.Thread(target=function, args=args, kwargs=kwargs)
 
     def status(self):
         print("Current status of threads:")
@@ -87,4 +82,24 @@ class simul_threads():
             self.starter()  # kick off threads
             time.sleep(0.1)  # limit CPU use
 
+
 # ---------------- end of threader definition ------------
+
+default_threader = simul_threads(20)
+
+
+def threaded(_func=None, *, threader=default_threader):
+    """ decorator function for threading """
+
+    def decorator_threaded(func):
+        @functools.wraps(func)
+        def wrapper_threaded(*args, **kwargs):
+            threader.new(func, *args, **kwargs)
+
+        return wrapper_threaded
+
+    if _func is None:
+        return decorator_threaded
+    else:
+        return decorator_threaded(_func)
+
