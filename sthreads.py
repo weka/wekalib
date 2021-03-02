@@ -85,7 +85,7 @@ class simul_threads():
 
 # ---------------- end of threader definition ------------
 
-default_threader = simul_threads(20)
+default_threader = simul_threads(100)
 
 
 def threaded(_func=None, *, threader=default_threader):
