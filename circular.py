@@ -12,11 +12,14 @@ log = getLogger(__name__)
 
 
 class circular_list():
-    def __init__(self, list):
+    def __init__(self, inputlist=None):
         # note: list is a [] kind of list
         self._lock = Lock()  # make it re-entrant (thread-safe)
-        self.list = list
         self.current = 0
+        if inputlist == None:
+            self.list = list()
+        else:
+            self.list = inputlist
         log.debug("circular list created")
 
     # return next item in the list
