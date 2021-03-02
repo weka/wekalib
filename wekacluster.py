@@ -159,6 +159,7 @@ class WekaCluster(object):
             raise
 
         self.clustersize = 0
+        self.hosts = circular_list(list())  # create an empty list
 
         for host in api_return:
             hostname = host["hostname"]
