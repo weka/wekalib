@@ -4,19 +4,18 @@
 
 # author: Vince Fleming, vince@weka.io
 
+from logging import getLogger
 from threading import Lock
-from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
-import logging
 
 log = getLogger(__name__)
 
 
-class circular_list():
+class circular_list:
     def __init__(self, inputlist=None):
         # note: list is a [] kind of list
         self._lock = Lock()  # make it re-entrant (thread-safe)
         self.current = 0
-        if inputlist == None:
+        if inputlist is None:
             self.list = list()
         else:
             self.list = inputlist
