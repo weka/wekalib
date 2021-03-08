@@ -33,6 +33,7 @@ class simul_threads():
         log.debug(f"creating new thread, func={function}")
         self.ids += 1
         self.staged[self.ids] = threading.Thread(target=function, args=args, kwargs=kwargs)
+        self.staged[self.ids].daemon = True     # these will die when the main thread dies
 
     def status(self):
         print("Current status of threads:")
