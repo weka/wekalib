@@ -163,7 +163,7 @@ class WekaCluster(object):
 
         for host in api_return:
             hostname = host["hostname"]
-            if host["mode"] == "backend":
+            if host["auto_remove_timeout"] == None and host["mode"] == "backend":
                 self.clustersize += 1
                 if host["state"] == "ACTIVE" and host["status"] == "UP":
                     # check if it's already in the list
