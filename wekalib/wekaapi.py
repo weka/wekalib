@@ -227,7 +227,7 @@ class WekaApi():
                 if method == "hosts_list":
                     for value_dict in resp_list:
                         if "mode" not in value_dict:
-                            if "drives_dedicated_cores" != 0:
+                            if value_dict["drives_dedicated_cores"] != 0:
                                 value_dict["mode"] = "backend"
                             else:
                                 value_dict["mode"] = "client"
