@@ -57,7 +57,7 @@ class WekaHost(object):
             self.host_in_progress -= 1
             raise
         self.host_in_progress -= 1
-        log.debug(f"elapsed time for host {self.name}: {round(time.time() - start_time, 2)} secs")
+        log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
 
     def __str__(self):
@@ -284,7 +284,9 @@ class WekaCluster(object):
 
         # get from weka-home
         try:
+            #log.debug(f"calling request {url} {fields} {headers}")
             resp = self.cloud_http_pool.request('GET', url, fields=fields, headers=headers)
+            #log.debug(f"request call complete")
         except Exception as exc:
             log.critical(f"GET request failure: {exc}")
             return []
@@ -327,13 +329,13 @@ class WekaCluster(object):
         self.cloud_proxy = self.call_api(method="cloud_get_proxy", parms={})
         if len(self.cloud_proxy["proxy"]) != 0:
             log.debug(f"Using proxy={self.cloud_proxy['proxy']}")
-            self.cloud_http_pool = urllib3.ProxyManager(self.cloud_proxy["proxy"])
+            self.cloud_http_pool = urllib3.ProxyManager(self.cloud_proxy["proxy"], timeout=5)
         else:
             # self.cloud_http_pool = urllib3.PoolManager()
             url = urllib3.util.parse_url(self.cloud_url)
-            self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3)
+            self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
 
-        end_time = datetime(datetime.datetime.utcnow())
+        end_time = datetime.datetime.utcnow()
         events = self.home_events(
             num_results=100,
             start_time=self.last_event_timestamp,
