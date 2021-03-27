@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='Wekalib',
-    version='1.0.3',
+    version='1.0.4',
 
     packages=['wekalib'],
     url='https://github.com/weka/wekalib',

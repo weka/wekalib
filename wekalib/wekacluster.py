@@ -4,7 +4,7 @@ import logging
 from wekalib.wekaapi import WekaApi
 import wekalib.wekaapi as wekaapi
 from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, \
-    datetime, datetime_to_lokitime
+    datetime, datetime_to_lokitime, datetime_to_wekatime
 from wekalib.circular import circular_list
 import traceback
 import urllib3
@@ -282,6 +282,8 @@ class WekaCluster(object):
         else:
             fields["intr"] = "f"
 
+        log.debug(f"GET from weka-home: {fields} --- {headers}")
+
         # get from weka-home
         try:
             #log.debug(f"calling request {url} {fields} {headers}")
@@ -291,10 +293,17 @@ class WekaCluster(object):
             log.critical(f"GET request failure: {exc}")
             return []
 
+        #log.debug(f"weka home response status: {resp.status}")
+        #log.debug(f"weka home response data: {resp.data}")
+
+        if resp.status != 200:
+            log.error(f"BAD weka home response status: {resp.status}")
+            return []
+
         events = json.loads(resp.data.decode('utf-8'))
 
         if len(events) == 0:
-            log.debug("no events!")
+            log.info("no events!")
             return []
 
         # format the descriptions; they don't come pre-formatted
@@ -305,9 +314,8 @@ class WekaCluster(object):
                 params = event["params"]
                 event["description"] = format_string.format(**params)
             else:
-                log.debug(f"unknown event type {event['type']}")
+                log.error(f"unknown event type {event['type']}")
 
-        # log.debug( json.dumps( events, indent=4, sort_keys=True ) )
         return events
 
     # get events from Weka
@@ -335,7 +343,8 @@ class WekaCluster(object):
             url = urllib3.util.parse_url(self.cloud_url)
             self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
 
-        end_time = datetime.datetime.utcnow()
+        #end_time = datetime.datetime.utcnow().isoformat() # needs iso format
+        end_time = datetime_to_wekatime(datetime.datetime.utcnow())
         events = self.home_events(
             num_results=100,
             start_time=self.last_event_timestamp,
