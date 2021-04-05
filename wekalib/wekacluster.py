@@ -10,8 +10,9 @@ import traceback
 import urllib3
 import datetime
 import time
-from threading import Lock
+from threading import Lock, Thread
 import json
+import queue
 
 log = getLogger(__name__)
 
@@ -21,14 +22,44 @@ class APIException(Exception):
         self.error_code = error_code
         self.error_msg = error_msg
 
+class APICall(object):
+    def __init__(self, opaque, method, parms):
+        self.opaque = opaque
+        self.method = method
+        self.parms = parms
+        self.result = dict()
+        self.status = "good"
+
 
 class WekaHost(object):
+
+    def submission_thread(self, submission_queue):
+        while True:
+            call = self.submission_queue.get()  # an APICall object
+            log.debug(f"{self.name}: dequeued request {call.method}, {call.parms}")
+            try:
+                call.result = self.call_api(call.method, call.parms)
+                call.status = "good"
+                log.debug(f"{self.name}: completed request {call.method}, {call.parms}")
+            except Exception as exc:
+                log.debug(f"{self.name}: error from api {exc}")
+                call.result =  exc
+                call.status = "error"
+                if type(exc) == wekaapi.HttpException:
+                    if exc.error_code == 502:  # Bad Gateway
+                        log.error(f"{self.name}: Error 502 - resubmitting {call.method}, {call.parms}")
+                self.submission_queue.put(call)  # error - resubmit
+                self.submission_queue.task_done()
+                return  # exit thread?
+            self.submission_queue.task_done()
+
     def __init__(self, hostname, cluster):
         self.name = hostname  # what's my name?
         self.cluster = cluster  # what cluster am I in?
         self.api_obj = None
         self._lock = Lock()
         self.host_in_progress = 0
+        self.submission_queue = cluster.submission_queue
 
         # log.debug(f"authfile={tokenfile}")
 
@@ -47,18 +78,28 @@ class WekaHost(object):
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
         self._scheme = cluster._scheme
 
+        log.debug(f"starting submission thread for host {hostname}")
+        Thread(target=self.submission_thread, args=(self.submission_queue,), daemon=True).start()  # start api submission thread
+        log.debug(f"submission thread for host {hostname} started")
+
+
     def call_api(self, method=None, parms={}):
         start_time = time.time()
-        self.host_in_progress += 1
-        log.debug(f"calling Weka API on host {self}/{method}, {self.host_in_progress} in progress for host")
+        with self._lock:
+            self.host_in_progress += 1
+            log.debug(f"calling Weka API on host {self}/{method}, {self.host_in_progress} in progress for host")
         try:
             result = self.api_obj.weka_api_command(method, parms)
-        except:
-            self.host_in_progress -= 1
+        except Exception as exc:
+            with self._lock:
+                self.host_in_progress -= 1
             raise
-        self.host_in_progress -= 1
+        with self._lock:
+            self.host_in_progress -= 1
         log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
+
+
 
     def __str__(self):
         return self.name
@@ -113,6 +154,8 @@ class WekaCluster(object):
         self.loadbalance = autohost
         self.last_event_timestamp = None
         self.last_get_events_time = None
+        self.submission_queue = queue.Queue()
+        self.outstanding_api_calls = list() 
 
         # fetch cluster configuration
         self.apitoken = wekaapi.get_tokens(self.authfile)
@@ -148,6 +191,7 @@ class WekaCluster(object):
                     # self.host_dict[hostname] = hostobj
                     templist.append(hostobj)
                 except:
+                    log.error(traceback.format_exc())
                     pass
             # self.hosts = circular_list(list(self.host_dict.keys()))
             self.hosts = circular_list(templist)
@@ -188,13 +232,28 @@ class WekaCluster(object):
         log.debug("wekaCluster {} refreshed. Cluster has {} members, {} are online".format(self.name, self.clustersize,
                                                                                            len(self.hosts)))
 
+
+    # a good way to execute a lot of api calls quickly
+    def async_call_api(self, opaque, method=None, parms={}):
+        call = APICall(opaque, method, parms)
+        self.outstanding_api_calls.append(call) # save a copy so we can get results
+        self.submission_queue.put(call)     # queue it for execution
+
+
+    def wait_async(self):
+        self.submission_queue.join()        # wait for them
+        all_results = self.outstanding_api_calls # copy the list
+        self.outstanding_api_calls = list() # clear the list
+        return all_results
+
+
     # cluster-level call_api() will retry commands on another host in the cluster on failure
     def call_api(self, method=None, parms={}):
-
         host = self.hosts.next()
 
         # api_return = None
         last_exception = None
+        log.debug(f"host is {host}")
 
         while host is not None:
             self.cluster_in_progress += 1
@@ -228,9 +287,10 @@ class WekaCluster(object):
 
         # ran out of hosts to talk to!
         if type(last_exception) == wekaapi.HttpException:
-            if last_exception.error_code == 503:  # Bad Gateway - it indicates a leader failover in progress
-                raise APIException(503, "No hosts available; leader failover")
+            if last_exception.error_code == 502:  # Bad Gateway
+                raise APIException(502, "No hosts available")
         raise APIException(100, "General communication failure")
+
 
         # ------------- end of call_api() -------------
 
