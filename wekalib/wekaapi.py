@@ -310,6 +310,7 @@ class WekaApi():
         with self._lock:
             self._in_progress += 1
             this_thread = self._in_progress
+        api_exception = None
         api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
         message_id = self.unique_id()
         request = self.format_request(message_id, method, parms)
@@ -326,20 +327,27 @@ class WekaApi():
                 return self.weka_api_command(method, parms)  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
+                api_exception = WekaApiException("NewConnectionError")
             elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
                 log.critical(f"ConnectionRefusedError caught")
+                api_exception = WekaApiException("ConnectionRefused")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
+                api_exception = WekaApiException("MaxRetriesError")
             with self._lock:
                 self._in_progress -= 1
-            raise
+            #return
         except Exception as exc:
             log.debug(f"{exc}")
             track = traceback.format_exc()
             print(track)
             with self._lock:
                 self._in_progress -= 1
-            return
+            api_exception = WekaApiException("MiscException")
+            #return
+
+        if api_exception is not None:
+            raise api_exception
 
         # log.info('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
         # log.info('Response Body: {}'.format(resp_body))
