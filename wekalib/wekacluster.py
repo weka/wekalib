@@ -286,7 +286,7 @@ class WekaCluster(object):
 
         # get from weka-home
         try:
-            #log.debug(f"calling request {url} {fields} {headers}")
+            log.debug(f"calling request {url} {fields} {headers}")
             resp = self.cloud_http_pool.request('GET', url, fields=fields, headers=headers)
             #log.debug(f"request call complete")
         except Exception as exc:
@@ -339,13 +339,13 @@ class WekaCluster(object):
             log.debug(f"Using proxy={self.cloud_proxy['proxy']}")
             self.cloud_http_pool = urllib3.ProxyManager(self.cloud_proxy["proxy"], timeout=5)
         else:
-            # self.cloud_http_pool = urllib3.PoolManager()
+            self.cloud_http_pool = urllib3.PoolManager()
             url = urllib3.util.parse_url(self.cloud_url)
             log.debug(f"no proxy: url.scheme is: {url.scheme}")
-            if url.scheme == "https":   # weka home cloud is https, but weka home local is http!
-                self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
-            else:
-                self.cloud_http_pool = urllib3.HTTPConnectionPool(url.host, retries=3, timeout=5)
+            #if url.scheme == "https":   # weka home cloud is https, but weka home local is http!
+            #self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
+            #else:
+            #    self.cloud_http_pool = urllib3.HTTPConnectionPool(url.host, retries=3, timeout=5)
 
         #end_time = datetime.datetime.utcnow().isoformat() # needs iso format
         end_time = datetime_to_wekatime(datetime.datetime.utcnow())
