@@ -341,7 +341,11 @@ class WekaCluster(object):
         else:
             # self.cloud_http_pool = urllib3.PoolManager()
             url = urllib3.util.parse_url(self.cloud_url)
-            self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
+            log.debug(f"no proxy: url.scheme is: {url.scheme}")
+            if url.scheme == "https":   # weka home cloud is https, but weka home local is http!
+                self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
+            else:
+                self.cloud_http_pool = urllib3.HTTPConnectionPool(url.host, retries=3, timeout=5)
 
         #end_time = datetime.datetime.utcnow().isoformat() # needs iso format
         end_time = datetime_to_wekatime(datetime.datetime.utcnow())
