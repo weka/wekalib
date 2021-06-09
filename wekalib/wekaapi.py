@@ -82,8 +82,11 @@ class WekaApi():
         self.headers = {}
         self._tokens = tokens
 
-        # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=3)
+        try:
+            # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
+            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=1.0)
+        except Exception as exc:
+            raise
 
         log.debug(f"tokens are {self._tokens}")
         if self._tokens is not None:
@@ -267,13 +270,14 @@ class WekaApi():
                 self._scheme = "http"
                 return self._login()  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
-                log.critical(f"ConnectionRefusedError/NewConnectionError caught")
+                log.debug(f"ConnectionRefusedError/NewConnectionError caught")
                 raise WekaApiException("Login failed")
             else:
-                log.critical(f"MaxRetryError: {exc.reason}")
-                track = traceback.format_exc()
-                print(track)
-                raise
+                # timeout
+                log.debug(f"MaxRetryError: {exc.reason}")
+                #track = traceback.format_exc()
+                #print(track)
+                raise WekaApiException("Timeout")
         except Exception as exc:
             log.critical(f"{exc}")
             raise WekaApiException("Login failed")
