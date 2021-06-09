@@ -81,6 +81,7 @@ class WekaApi():
         self._timeout = timeout
         self.headers = {}
         self._tokens = tokens
+        self._in_progress = 0
 
         # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
         self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=3)
@@ -306,11 +307,14 @@ class WekaApi():
     # re-implemented with urllib3
     def weka_api_command(self, method, parms):
 
+        with self._lock:
+            self._in_progress += 1
+            this_thread = self._in_progress
+        api_exception = None
         api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
-        log.debug(f"api_endpoint = {api_endpoint}")
         message_id = self.unique_id()
         request = self.format_request(message_id, method, parms)
-        log.debug(f"trying {api_endpoint}")
+        log.debug(f"trying {api_endpoint}; this_thread={this_thread}")
         try:
             response = self.http_conn.request('POST', api_endpoint, headers=self.headers,
                                               body=json.dumps(request).encode('utf-8'))
@@ -323,16 +327,27 @@ class WekaApi():
                 return self.weka_api_command(method, parms)  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
+                api_exception = WekaApiException("NewConnectionError")
             elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
                 log.critical(f"ConnectionRefusedError caught")
+                api_exception = WekaApiException("ConnectionRefused")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
-            raise
+                api_exception = WekaApiException("MaxRetriesError")
+            with self._lock:
+                self._in_progress -= 1
+            #return
         except Exception as exc:
             log.debug(f"{exc}")
             track = traceback.format_exc()
             print(track)
-            return
+            with self._lock:
+                self._in_progress -= 1
+            api_exception = WekaApiException("MiscException")
+            #return
+
+        if api_exception is not None:
+            raise api_exception
 
         # log.info('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
         # log.info('Response Body: {}'.format(resp_body))
@@ -342,25 +357,39 @@ class WekaApi():
             try:
                 self._login()
             except:
+                with self._lock:
+                    self._in_progress -= 1
                 raise
+            with self._lock:
+                self._in_progress -= 1
             return self.weka_api_command(method, parms)  # recurse - try again
 
         if response.status in (httpclient.OK, httpclient.CREATED, httpclient.ACCEPTED):
             response_object = json.loads(response.data.decode('utf-8'))
             if 'error' in response_object:
                 log.error("bad response from {}".format(self._host))
+                with self._lock:
+                    self._in_progress -= 1
                 raise WekaApiIOStopped(response_object['error']['message'])
-            log.debug("good response from {}".format(self._host))
+            with self._lock:
+                self._in_progress -= 1
+            log.debug(f"good response from {self._host}, this_thread={this_thread}, in_progress={self._in_progress}")
             return self._format_response(method, response_object)
         elif response.status == httpclient.MOVED_PERMANENTLY:
             oldhost = self._host
             self._scheme, self._host, self._port, self._path = self._parse_url(response.getheader('Location'))
             log.debug("redirection: {} moved to {}".format(oldhost, self._host))
         else:
-            # log.error(f"unknown error on {self._host}, status={response.status}, reason={response.reason}")
+            log.error(f"Other error on {self._host}, status={response.status}, reason={response.reason}, this_thread={this_thread}, in_progress={self._in_progress}")
+            with self._lock:
+                self._in_progress -= 1
             raise HttpException(response.status, response.reason)
 
+        # should only get here if MOVED_PERMANENTLY?
         resp_dict = json.loads(response.data.decode('utf-8'))
+        with self._lock:
+            self._in_progress -= 1
+        log.debug(f"exiting from {self._host}, in_progress={self._in_progress}**************************************")
         return self._format_response(method, resp_dict)
 
 
