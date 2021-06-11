@@ -102,7 +102,7 @@ class WekaApi():
         try:
             self._login()
         except Exception as exc:
-            log.error(f"Error creating API object: {exc}")
+            log.error(f"Error creating API object: host={host}, {exc}")
             raise
 
         log.debug("WekaApi: connected to {}".format(self._host))
@@ -344,8 +344,8 @@ class WekaApi():
             print(track)
             return
 
-        # log.info('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
-        # log.info('Response Body: {}'.format(resp_body))
+        # log.debug('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
+        # log.debug('Response Body: {}'.format(resp_body))
 
         if response.status == httpclient.UNAUTHORIZED:  # not logged in?
             log.debug("need to login")
@@ -374,31 +374,50 @@ class WekaApi():
         return self._format_response(method, resp_dict)
 
 
-# stand-alone func
-def get_tokens(token_file):
-    error = False
-    log.debug(f"token_file={token_file}")
-    tokens = None
-    if token_file is not None:
-        path = os.path.expanduser(token_file)
-        if os.path.exists(path):
-            try:
-                with open(path) as fp:
-                    tokens = json.load(fp)
-                return tokens
-            except Exception:
-                log.critical("unable to open token file {}".format(token_file))
-                error = True
-        else:
-            error = True
-            log.error("token file {} not found".format(token_file))
+# returns an absolute path to a file, if it exists, or None if not
+def find_token_file(token_file):
+    search_path = ['.', '~/.weka', '.weka']
 
-    if error:
-        # raise WekaApiException('warning: Could not parse {0}, ignoring file'.format(path), file=sys.stderr)
+    if token_file is None:
         return None
-    else:
-        return tokens
 
+    test_name = os.path.expanduser(token_file)  # will expand to an absolute path (starts with /) if ~ is used
+
+    if token_file[0] == '/':
+        # either token_file was already an abssolute path, or expansuser did it's job
+        if os.path.exists(test_name):
+            return test_name
+        else:
+            # can't expand a abs path any further, and it does not exist
+            return None
+
+    # search for it in the path
+    for base_path in search_path:
+        test_name = os.path.abspath(f"{base_path}/{token_file}")
+        if os.path.exists(test_name):
+            return test_name
+
+    return None
+#   end of find_token_file()
+
+# stand-alone func
+# assumes we have already checked that the file exits... see find_token_file() above
+def get_tokens(token_file):
+
+    if token_file is None:
+        return None
+
+    log.info(f"Using auth-token file '{token_file}'")
+
+    try:
+        with open(token_file) as fp:
+            tokens = json.load(fp)
+        return tokens
+    except Exception as exc:
+        error = True
+        error_message = f"Unable to open/parse auth token file '{token_file}': {exc}"
+
+    raise WekaApiException(error_message)
 
 #   end of get_tokens()
 

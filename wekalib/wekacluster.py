@@ -1,7 +1,7 @@
 from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
 import logging
 
-from wekalib.wekaapi import WekaApi
+from wekalib.wekaapi import WekaApi, find_token_file
 import wekalib.wekaapi as wekaapi
 from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, \
     datetime, datetime_to_lokitime, datetime_to_wekatime
@@ -129,7 +129,10 @@ class WekaCluster(object):
         self.last_event_timestamp = None
         self.last_get_events_time = None
 
-        self.apitoken = wekaapi.get_tokens(self.authfile)
+        try:
+            self.apitoken = wekaapi.get_tokens(find_token_file(self.authfile))
+        except:
+            raise
 
 
         # refresh the config from the clusterspec - initial configuration to ensure connectivity
@@ -219,10 +222,12 @@ class WekaCluster(object):
                         try:
                             log.debug(f"creating new WekaHost instance for host {hostname}")
                             hostobj = WekaHost(hostname, self, ip=host_dp_ip) # vince issue - don't want to timeout on ip addr that we can't access
-                            #hostobj = WekaHost(hostname, self) # vince issue - don't want to timeout on ip addr that we can't access
                             self.hosts.insert(hostobj)
                         except Exception as exc:
-                            log.error(f"Error trying to contact host {hostname}, removing from config")
+                            if self.dataplane_accessible:
+                                log.info(f"Error trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
+                            else:
+                                log.error(f"Error trying to contact host {hostname}, removing from config")
                             last_exception = exc
                             self.dataplane_accessible = False
                     else:
