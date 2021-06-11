@@ -18,8 +18,8 @@ log = getLogger(__name__)
 
 class APIException(Exception):
     def __init__(self, error_code, error_msg):
-        self.error_code = error_code
-        self.error_msg = error_msg
+        self.code = error_code
+        self.message = error_msg
 
 
 class WekaHost(object):
@@ -101,7 +101,7 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # auth file is output from "weka user login" command.
     # autohost is a bool = should we distribute the api call load among all weka servers
-    def __init__(self, clusterspec, authfile=None, autohost=True):
+    def __init__(self, clusterspec, authfile):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
@@ -125,14 +125,15 @@ class WekaCluster(object):
         self.dataplane_accessible = True
         self.host_dict = {}  # host:WekaHost dictionary
         self.authfile = authfile
-        self.loadbalance = autohost
         self.last_event_timestamp = None
         self.last_get_events_time = None
 
+        log.debug("getting tokens from {self.authfile}")
         try:
             self.apitoken = wekaapi.get_tokens(find_token_file(self.authfile))
         except:
             raise
+        log.debug(f"got tokens = {self.apitoken}")
 
 
         # refresh the config from the clusterspec - initial configuration to ensure connectivity
@@ -277,7 +278,7 @@ class WekaCluster(object):
 
         # ran out of hosts to talk to!
         if type(last_exception) == wekaapi.HttpException:
-            if last_exception.error_code == 503:  # Bad Gateway - it indicates a leader failover in progress
+            if last_exception.code == 503:  # Bad Gateway - it indicates a leader failover in progress
                 raise APIException(503, "No hosts available; leader failover")
 
         raise APIException(100, "General communication failure")

@@ -46,8 +46,8 @@ log = getLogger(__name__)
 
 class HttpException(Exception):
     def __init__(self, error_code, error_msg):
-        self.error_code = error_code
-        self.error_msg = error_msg
+        self.code = error_code
+        self.message = error_msg
 
 
 # class JsonRpcException(Exception):
@@ -378,12 +378,14 @@ class WekaApi():
 def find_token_file(token_file):
     search_path = ['.', '~/.weka', '.weka']
 
+    log.info(f"looking for token file {token_file}")
     if token_file is None:
         return None
 
     test_name = os.path.expanduser(token_file)  # will expand to an absolute path (starts with /) if ~ is used
+    log.debug(f"name expanded to {test_name}")
 
-    if token_file[0] == '/':
+    if test_name[0] == '/':
         # either token_file was already an abssolute path, or expansuser did it's job
         if os.path.exists(test_name):
             return test_name
@@ -392,18 +394,23 @@ def find_token_file(token_file):
             return None
 
     # search for it in the path
-    for base_path in search_path:
+    for path in search_path:
+        base_path = os.path.expanduser(path)
         test_name = os.path.abspath(f"{base_path}/{token_file}")
+        log.info(f"Checking for {test_name}")
         if os.path.exists(test_name):
+            log.debug(f"Found '{test_name}'")
             return test_name
 
-    return None
+    log.debug(f"token file {token_file} not found")
+    raise WekaApiException(f"Unable to find token file '{token_file}'")
 #   end of find_token_file()
 
 # stand-alone func
 # assumes we have already checked that the file exits... see find_token_file() above
 def get_tokens(token_file):
 
+    log.debug(f"token file is {token_file}")
     if token_file is None:
         return None
 
