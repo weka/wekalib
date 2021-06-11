@@ -70,7 +70,7 @@ class WekaApiException(Exception):
 
 
 class WekaApi():
-    def __init__(self, host, scheme='http', port=14000, path='/api/v1', timeout=10, tokens=None):
+    def __init__(self, host, scheme='http', port=14000, path='/api/v1', timeout=5.0, tokens=None):
 
         self._lock = Lock()  # make it re-entrant (thread-safe)
         self._scheme = scheme
@@ -78,13 +78,13 @@ class WekaApi():
         self._port = port
         self._path = path
         self._conn = None
-        self._timeout = timeout
+        self._timeout = urllib3.util.Timeout(total=timeout,connect=2.0,read=timeout)
         self.headers = {}
         self._tokens = tokens
 
         try:
             # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=1.0)
+            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
         except Exception as exc:
             raise
 
@@ -99,7 +99,11 @@ class WekaApi():
         self.headers['CLI'] = False
         self.headers['Client-Type'] = 'WEKA'
 
-        self._login()
+        try:
+            self._login()
+        except Exception as exc:
+            log.error(f"Error creating API object: {exc}")
+            raise
 
         log.debug("WekaApi: connected to {}".format(self._host))
 
@@ -134,6 +138,7 @@ class WekaApi():
         assert m
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
+    # no longer used...
     def _open_connection(self):
         host_unreachable = False
         try_again = True
@@ -270,8 +275,9 @@ class WekaApi():
                 self._scheme = "http"
                 return self._login()  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
-                log.debug(f"ConnectionRefusedError/NewConnectionError caught")
-                raise WekaApiException("Login failed")
+                log.debug(f"ConnectionRefusedError/NewConnectionError caught)")
+                #raise WekaApiException("Login failed")
+                raise WekaApiException("host_unreachable")
             else:
                 # timeout
                 log.debug(f"MaxRetryError: {exc.reason}")

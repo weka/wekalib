@@ -36,7 +36,7 @@ class WekaHost(object):
         # try first with dataplane ip address, if given
         if self.ip is not None:
             try:
-                self.api_obj = WekaApi(self.ip, tokens=self.cluster.apitoken, timeout=10, scheme=cluster._scheme)
+                self.api_obj = WekaApi(self.ip, tokens=self.cluster.apitoken, scheme=cluster._scheme)
             except Exception as exc:
                 log.debug(f"Error creating WekaApi object with ip address: {exc}")
                 self.api_obj = None
@@ -45,10 +45,12 @@ class WekaHost(object):
         # if the ip didn't work, try using the hostname (needs DNS/hosts file)
         if self.api_obj is None:
             try:
-                self.api_obj = WekaApi(self.name, tokens=self.cluster.apitoken, timeout=10, scheme=cluster._scheme)
+                self.api_obj = WekaApi(self.name, tokens=self.cluster.apitoken, scheme=cluster._scheme)
             except Exception as exc:
                 log.debug(f"Error creating WekaApi object: {exc}")
                 self.api_obj = None
+                if exc.message == "host_unreachable":
+                    log.critical(f"Host {hostname} is unreachable - is it in /etc/hosts and/or DNS?")
                 raise
 
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
@@ -64,7 +66,10 @@ class WekaHost(object):
             self.host_in_progress -= 1
             raise
         self.host_in_progress -= 1
-        log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
+        if method == "stats_show":
+            log.info(f"elapsed time for host {self}/{method}/{parms['category']}/{parms['stat']:15}: {round(time.time() - start_time, 2)} secs")
+        else:
+            log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
 
     def __str__(self):
@@ -113,7 +118,8 @@ class WekaCluster(object):
         self.cloud_proxy = None
         self.cloud_http_pool = None
 
-        self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
+        #self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
+        self.orig_hostlist = clusterspec
         self.clusterspec_hosts = None
         self.hosts = None
         self.dataplane_accessible = True
@@ -125,24 +131,8 @@ class WekaCluster(object):
 
         self.apitoken = wekaapi.get_tokens(self.authfile)
 
-        # fetch cluster configuration - check what we have - do one call manually
 
-        # see if we can ping the hosts
-        #host_is_up = dict()
-        #uphosts = list()
-
-        #for hostname in self.orig_hostlist:
-        #    #host_is_up[hostname] = 0 if os.system("ping -c 1 " + hostname) is 0 else 1
-        #    #if host_is_up[hostname] == 0:
-        #    if os.system("ping -c 1 " + hostname) is 0:
-        #        uphosts.append(hostname)
-
-        #if len(uphosts) == 0:
-        #    log.error(f"None of the hosts in cluster {clusterspec} are accessible")
-        #    raise ApiException("No hosts accessible")
-
-
-        # refresh the full config
+        # refresh the config from the clusterspec - initial configuration to ensure connectivity
         try:
             self.refresh_from_clusterspec()
         except:
@@ -190,12 +180,14 @@ class WekaCluster(object):
                 log.debug(f"Unable to create any WekaHosts ({last_error})")
                 raise last_error
             self.clusterspec_hosts = circular_list(templist)
+            self.hosts = self.clusterspec_hosts
 
 
     def refresh_config(self):
 
-        # start over?  hmm... let's start with the clusterspec hosts
-        self.hosts = self.clusterspec_hosts
+        # fall back to clusterspec if we've lost connectivity; try those
+        if len(self.hosts) == 0:
+            self.hosts = self.clusterspec_hosts
 
         #
         # get the rest of the cluster (bring back any that had previously disappeared, or have been added)
@@ -207,6 +199,7 @@ class WekaCluster(object):
 
         self.clustersize = 0
         self.hosts = circular_list(list())  # create an empty list
+        last_exception = None
 
         # loop through the hosts in the hosts_list (ie: 'weka cluster host')
         for host in api_return:
@@ -228,19 +221,19 @@ class WekaCluster(object):
                             hostobj = WekaHost(hostname, self, ip=host_dp_ip) # vince issue - don't want to timeout on ip addr that we can't access
                             #hostobj = WekaHost(hostname, self) # vince issue - don't want to timeout on ip addr that we can't access
                             self.hosts.insert(hostobj)
-                        except:
+                        except Exception as exc:
+                            log.error(f"Error trying to contact host {hostname}, removing from config")
+                            last_exception = exc
                             self.dataplane_accessible = False
-                            pass
                     else:
                         log.debug(f"{hostname} already in list")
-
-        # self.hosts = circular_list(templist)
-        # self.hosts = circular_list(list(self.host_dict.keys()))
 
         log.debug(f"host list is: {str(self.hosts)}")
 
         log.debug("wekaCluster {} refreshed. Cluster has {} members, {} are online".format(self.name, self.clustersize,
                                                                                            len(self.hosts)))
+        if len(self.hosts) == 0:
+            raise last_exception
 
     # cluster-level call_api() will retry commands on another host in the cluster on failure
     def call_api(self, method=None, parms={}):
@@ -259,9 +252,6 @@ class WekaCluster(object):
             except wekaapi.WekaApiIOStopped:
                 log.error(f"IO Stopped on Cluster {self}")
                 raise
-            # <class 'wekaapi.HttpException'> error (502, 'Bad Gateway') - if we get this, leader failing over; wait a few secs and retry?
-            # except wekaapi.HttpException as exc:
-            #    last_exception = exc
             except Exception as exc:
                 last_exception = exc
                 self.cluster_in_progress -= 1
@@ -269,8 +259,8 @@ class WekaCluster(object):
                 last_hostname = str(host)
                 self.hosts.remove(host)  # it failed, so remove it from the list
                 host = self.hosts.next()
-                if host is None:
-                    break  # fall through to raise exception
+                #if host is None:
+                #    break  # fall through to raise exception
                 self.errors += 1
                 log.error(
                     f"cluster={self}, error {exc} spawning command {method}/{parms} on host {last_hostname}. Retrying on {host}.")
@@ -284,6 +274,7 @@ class WekaCluster(object):
         if type(last_exception) == wekaapi.HttpException:
             if last_exception.error_code == 503:  # Bad Gateway - it indicates a leader failover in progress
                 raise APIException(503, "No hosts available; leader failover")
+
         raise APIException(100, "General communication failure")
 
         # ------------- end of call_api() -------------
