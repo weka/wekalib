@@ -333,11 +333,17 @@ class WekaApi():
                 return self.weka_api_command(method, parms)  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
-            elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
-                log.critical(f"ConnectionRefusedError caught")
+            #elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):    # does not exist.  Where did I get that from?
+            #    log.critical(f"ConnectionRefusedError caught")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
             raise
+        except urllib3.exceptions.ReadTimeoutError as exc:
+            log.error(f"ReadTimeout error: {exc}")
+            return
+        except urllib3.exceptions.ProtocolError as exc:
+            log.error(f"Protocol error: {exc}")
+            return
         except Exception as exc:
             log.debug(f"{exc}")
             track = traceback.format_exc()
