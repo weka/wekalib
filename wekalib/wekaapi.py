@@ -46,8 +46,8 @@ log = getLogger(__name__)
 
 class HttpException(Exception):
     def __init__(self, error_code, error_msg):
-        self.error_code = error_code
-        self.error_msg = error_msg
+        self.code = error_code
+        self.message = error_msg
 
 
 # class JsonRpcException(Exception):
@@ -70,7 +70,7 @@ class WekaApiException(Exception):
 
 
 class WekaApi():
-    def __init__(self, host, scheme='http', port=14000, path='/api/v1', timeout=10, tokens=None):
+    def __init__(self, host, scheme='http', port=14000, path='/api/v1', timeout=5.0, tokens=None):
 
         self._lock = Lock()  # make it re-entrant (thread-safe)
         self._scheme = scheme
@@ -78,13 +78,16 @@ class WekaApi():
         self._port = port
         self._path = path
         self._conn = None
-        self._timeout = timeout
+        self._timeout = urllib3.util.Timeout(total=timeout,connect=2.0,read=timeout)
         self.headers = {}
         self._tokens = tokens
         self._in_progress = 0
 
-        # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=3)
+        try:
+            # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
+            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
+        except Exception as exc:
+            raise
 
         log.debug(f"tokens are {self._tokens}")
         if self._tokens is not None:
@@ -97,7 +100,11 @@ class WekaApi():
         self.headers['CLI'] = False
         self.headers['Client-Type'] = 'WEKA'
 
-        self._login()
+        try:
+            self._login()
+        except Exception as exc:
+            log.error(f"Error creating API object: host={host}, {exc}")
+            raise
 
         log.debug("WekaApi: connected to {}".format(self._host))
 
@@ -132,6 +139,7 @@ class WekaApi():
         assert m
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
+    # no longer used...
     def _open_connection(self):
         host_unreachable = False
         try_again = True
@@ -268,13 +276,15 @@ class WekaApi():
                 self._scheme = "http"
                 return self._login()  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
-                log.critical(f"ConnectionRefusedError/NewConnectionError caught")
-                raise WekaApiException("Login failed")
+                log.debug(f"ConnectionRefusedError/NewConnectionError caught)")
+                #raise WekaApiException("Login failed")
+                raise WekaApiException("host_unreachable")
             else:
-                log.critical(f"MaxRetryError: {exc.reason}")
-                track = traceback.format_exc()
-                print(track)
-                raise
+                # timeout
+                log.debug(f"MaxRetryError: {exc.reason}")
+                #track = traceback.format_exc()
+                #print(track)
+                raise WekaApiException("Timeout")
         except Exception as exc:
             log.critical(f"{exc}")
             raise WekaApiException("Login failed")
@@ -327,16 +337,15 @@ class WekaApi():
                 return self.weka_api_command(method, parms)  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
-                api_exception = WekaApiException("NewConnectionError")
-            elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
-                log.critical(f"ConnectionRefusedError caught")
-                api_exception = WekaApiException("ConnectionRefused")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
-                api_exception = WekaApiException("MaxRetriesError")
-            with self._lock:
-                self._in_progress -= 1
-            #return
+            raise
+        except urllib3.exceptions.ReadTimeoutError as exc:
+            log.error(f"ReadTimeout error: {exc}")
+            return
+        except urllib3.exceptions.ProtocolError as exc:
+            log.error(f"Protocol error: {exc}")
+            return
         except Exception as exc:
             log.debug(f"{exc}")
             track = traceback.format_exc()
@@ -349,8 +358,8 @@ class WekaApi():
         if api_exception is not None:
             raise api_exception
 
-        # log.info('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
-        # log.info('Response Body: {}'.format(resp_body))
+        # log.debug('Response Code: {}'.format(response.status))  # ie: 200, 501, etc
+        # log.debug('Response Body: {}'.format(resp_body))
 
         if response.status == httpclient.UNAUTHORIZED:  # not logged in?
             log.debug("need to login")
@@ -393,31 +402,57 @@ class WekaApi():
         return self._format_response(method, resp_dict)
 
 
-# stand-alone func
-def get_tokens(token_file):
-    error = False
-    log.debug(f"token_file={token_file}")
-    tokens = None
-    if token_file is not None:
-        path = os.path.expanduser(token_file)
-        if os.path.exists(path):
-            try:
-                with open(path) as fp:
-                    tokens = json.load(fp)
-                return tokens
-            except Exception:
-                log.critical("unable to open token file {}".format(token_file))
-                error = True
-        else:
-            error = True
-            log.error("token file {} not found".format(token_file))
+# returns an absolute path to a file, if it exists, or None if not
+def find_token_file(token_file):
+    search_path = ['.', '~/.weka', '.weka']
 
-    if error:
-        # raise WekaApiException('warning: Could not parse {0}, ignoring file'.format(path), file=sys.stderr)
+    log.info(f"looking for token file {token_file}")
+    if token_file is None:
         return None
-    else:
-        return tokens
 
+    test_name = os.path.expanduser(token_file)  # will expand to an absolute path (starts with /) if ~ is used
+    log.debug(f"name expanded to {test_name}")
+
+    if test_name[0] == '/':
+        # either token_file was already an abssolute path, or expansuser did it's job
+        if os.path.exists(test_name):
+            return test_name
+        else:
+            # can't expand a abs path any further, and it does not exist
+            return None
+
+    # search for it in the path
+    for path in search_path:
+        base_path = os.path.expanduser(path)
+        test_name = os.path.abspath(f"{base_path}/{token_file}")
+        log.info(f"Checking for {test_name}")
+        if os.path.exists(test_name):
+            log.debug(f"Found '{test_name}'")
+            return test_name
+
+    log.debug(f"token file {token_file} not found")
+    raise WekaApiException(f"Unable to find token file '{token_file}'")
+#   end of find_token_file()
+
+# stand-alone func
+# assumes we have already checked that the file exits... see find_token_file() above
+def get_tokens(token_file):
+
+    log.debug(f"token file is {token_file}")
+    if token_file is None:
+        return None
+
+    log.info(f"Using auth-token file '{token_file}'")
+
+    try:
+        with open(token_file) as fp:
+            tokens = json.load(fp)
+        return tokens
+    except Exception as exc:
+        error = True
+        error_message = f"Unable to open/parse auth token file '{token_file}': {exc}"
+
+    raise WekaApiException(error_message)
 
 #   end of get_tokens()
 

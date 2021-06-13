@@ -1,7 +1,7 @@
 from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
 import logging
 
-from wekalib.wekaapi import WekaApi
+from wekalib.wekaapi import WekaApi, find_token_file
 import wekalib.wekaapi as wekaapi
 from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, \
     datetime, datetime_to_lokitime, datetime_to_wekatime
@@ -19,8 +19,8 @@ log = getLogger(__name__)
 
 class APIException(Exception):
     def __init__(self, error_code, error_msg):
-        self.error_code = error_code
-        self.error_msg = error_msg
+        self.code = error_code
+        self.message = error_msg
 
 class APICall(object):
     def __init__(self, opaque, method, parms):
@@ -32,10 +32,11 @@ class APICall(object):
 
 
 class WekaHost(object):
+    def __init__(self, hostname, cluster, ip=None):
 
-    def __init__(self, hostname, cluster):
         self.name = hostname  # what's my name?
         self.cluster = cluster  # what cluster am I in?
+        self.ip = ip
         self.api_obj = None
         self._lock = Lock()
         self.host_in_progress = 0
@@ -45,17 +46,25 @@ class WekaHost(object):
 
         # log.debug(f"authfile={tokenfile}")
 
-        try:
-            self.api_obj = WekaApi(self.name, tokens=self.cluster.apitoken, timeout=10, scheme=cluster._scheme)
-        except Exception as exc:
-            log.error(f"Error creating WekaApi object: {exc}")
-            # log.error(traceback.format_exc())
-            self.api_obj = None
+        # try first with dataplane ip address, if given
+        if self.ip is not None:
+            try:
+                self.api_obj = WekaApi(self.ip, tokens=self.cluster.apitoken, scheme=cluster._scheme)
+            except Exception as exc:
+                log.debug(f"Error creating WekaApi object with ip address: {exc}")
+                self.api_obj = None
+                raise
 
+        # if the ip didn't work, try using the hostname (needs DNS/hosts file)
         if self.api_obj is None:
-            # can't open API session, fail.
-            log.error("WekaHost: unable to open API session")
-            raise Exception("Unable to open API session")
+            try:
+                self.api_obj = WekaApi(self.name, tokens=self.cluster.apitoken, scheme=cluster._scheme)
+            except Exception as exc:
+                log.debug(f"Error creating WekaApi object: {exc}")
+                self.api_obj = None
+                if exc.message == "host_unreachable":
+                    log.critical(f"Host {hostname} is unreachable - is it in /etc/hosts and/or DNS?")
+                raise
 
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
         self._scheme = cluster._scheme
@@ -73,9 +82,12 @@ class WekaHost(object):
             with self._lock:
                 self.host_in_progress -= 1
             raise
-        with self._lock:
-            self.host_in_progress -= 1
-        log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
+        self.host_in_progress -= 1
+        if method == "stats_show":
+            log.info(f"elapsed time for host {self}/{method}/{parms['category']}/{parms['stat']:15}: {round(time.time() - start_time, 2)} secs")
+        else:
+            log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
+
         return result
 
 
@@ -145,7 +157,11 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # auth file is output from "weka user login" command.
     # autohost is a bool = should we distribute the api call load among all weka servers
-    def __init__(self, clusterspec, authfile=None, autohost=True):
+    #
+    # NOTE NEW FORMAT!
+    # clusterspec is moving to be a list of strings (hostnames/ips) instead of a string of a comma-separated list!!!
+    #
+    def __init__(self, clusterspec, authfile):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
@@ -161,18 +177,36 @@ class WekaCluster(object):
         self.cloud_proxy = None
         self.cloud_http_pool = None
 
-        self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
+        # for backward compatibility...  will be removed in a future release.
+        if type(clusterspec) == str:
+            self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
+        else:
+            self.orig_hostlist = clusterspec
+        self.clusterspec_hosts = None
         self.hosts = None
+        self.dataplane_accessible = True
         self.host_dict = {}  # host:WekaHost dictionary
         self.authfile = authfile
-        self.loadbalance = autohost
         self.last_event_timestamp = None
         self.last_get_events_time = None
         self.submission_queue = queue.Queue()
         self.outstanding_api_calls = list() 
 
-        # fetch cluster configuration
-        self.apitoken = wekaapi.get_tokens(self.authfile)
+        log.debug("getting tokens from {self.authfile}")
+        try:
+            self.apitoken = wekaapi.get_tokens(find_token_file(self.authfile))
+        except:
+            raise
+        log.debug(f"got tokens = {self.apitoken}")
+
+
+        # refresh the config from the clusterspec - initial configuration to ensure connectivity
+        try:
+            self.refresh_from_clusterspec()
+        except:
+            raise
+
+        # refresh the full config
         try:
             self.refresh_config()
         except:
@@ -193,62 +227,84 @@ class WekaCluster(object):
     def sizeof(self):
         return len(self.hosts)
 
-    def refresh_config(self):
+    # make initial contact via the clusterspec - should be used only occasionally
+    def refresh_from_clusterspec(self):
         # we need *some* kind of host(s) in order to get the hosts_list below
         if self.hosts is None or len(self.hosts) == 0:
+            templist = []
+            last_error = None
             log.debug(f"Refreshing hostlists from original")
             # create objects for the hosts; recover from total failure
             for hostname in self.orig_hostlist:
                 try:
                     hostobj = WekaHost(hostname, self)
-                    self.host_dict[hostname] = hostobj
-                except:
-                    #log.error(traceback.format_exc())
-                    raise
-            self.hosts = circular_list(list(self.host_dict.keys()))
+                    templist.append(hostobj)
+                except Exception as exc:
+                    log.debug(f"failed creating WekaHost: {exc}")
+                    last_error = exc
+                    pass
 
+            if len(templist) == 0:
+                log.debug(f"Unable to create any WekaHosts ({last_error})")
+                raise last_error
+            self.clusterspec_hosts = circular_list(templist)
+            self.hosts = self.clusterspec_hosts
+
+
+    def refresh_config(self):
+
+        # fall back to clusterspec if we've lost connectivity; try those
+        if len(self.hosts) == 0:
+            self.hosts = self.clusterspec_hosts
+
+        #
         # get the rest of the cluster (bring back any that had previously disappeared, or have been added)
+        #
         try:
             api_return = self.call_api(method="hosts_list", parms={})
         except:
             raise
 
         self.clustersize = 0
-        #self.hosts = circular_list(list())  # create an empty list
+        self.hosts = circular_list(list())  # create an empty list
+        last_exception = None
 
+
+        # loop through the hosts in the hosts_list (ie: 'weka cluster host')
         for host in api_return:
             hostname = host["hostname"]
             if host["auto_remove_timeout"] == None or host["mode"] == "backend":
                 self.clustersize += 1
                 if host["state"] == "ACTIVE" and host["status"] == "UP":
                     # check if it's already in the list
-                    if hostname not in self.host_dict.keys():
+                    # need a comparison of hostname to hostobj - vince  ???
+                    if hostname not in self.hosts:
+                        if self.dataplane_accessible:
+                            host_dp_ip = host["host_ip"]
+                        else:
+                            host_dp_ip = None
+
                         try:
+                            # prefer dataplane ips...
                             log.debug(f"creating new WekaHost instance for host {hostname}")
-                            hostobj = WekaHost(hostname, self)
-                            self.host_dict[hostname] = hostobj
-                        except:
-                            pass
+                           hostobj = WekaHost(hostname, self, ip=host_dp_ip) # will timeout if can't access dataplane ip
+                            self.hosts.insert(hostobj)
+                        except Exception as exc:
+                            if self.dataplane_accessible:
+                                log.info(f"Error trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
+                            else:
+                                log.error(f"Error trying to contact host {hostname}, removing from config")
+                            last_exception = exc
+                            self.dataplane_accessible = False   # if the first ip fails, just assume all will fail; use hostnames instead
                     else:
                         log.debug(f"{hostname} already in list")
-                    if hostname not in self.hosts.list:
-                        self.hosts.insert(hostname)
-                    self.host_dict[hostname].status = "UP"
-                else:
-                    log.debug(f"{hostname} is not UP")
-                    if hostname in self.host_dict.keys():   # make sure we've marked it DOWN
-                        self.host_dict[hostname].status = "DOWN"
-                        self.hosts.remove(hostname)
-
-        # make sure submission threads are running
-        #for hostname, host in self.host_dict.items():
-        for hostname in self.hosts.list:  # use the non-circular version ;)
-            self.host_dict[hostname].check_submission_thread()  # only start those on the hosts list (active hosts)
 
         log.debug(f"host list is: {str(self.hosts)}")
 
         log.debug("wekaCluster {} refreshed. Cluster has {} members, {} are online".format(self.name, self.clustersize,
                                                                                            len(self.hosts)))
+        if len(self.hosts) == 0:
+            raise last_exception
 
 
     # a good way to execute a lot of api calls quickly
@@ -285,9 +341,6 @@ class WekaCluster(object):
             except wekaapi.WekaApiIOStopped:
                 log.error(f"IO Stopped on Cluster {self}")
                 raise
-            # <class 'wekaapi.HttpException'> error (502, 'Bad Gateway') - if we get this, leader failing over; wait a few secs and retry?
-            # except wekaapi.HttpException as exc:
-            #    last_exception = exc
             except Exception as exc:
                 log.debug(f"caught exception {exc}")
                 last_exception = exc
@@ -295,10 +348,9 @@ class WekaCluster(object):
                 # something went wrong...  stop talking to this host from here on.  We'll try to re-establish communications later
                 last_hostname = str(host)
                 self.hosts.remove(host)  # it failed, so remove it from the list
-                hostname = self.hosts.next()
-                if hostname is None:
-                    break  # fall through to raise exception
-                host = self.host_dict[hostname]
+                host = self.hosts.next()
+                #if host is None:
+                #    break  # fall through to raise exception
                 self.errors += 1
                 log.error(
                     f"cluster={self}, error {exc} spawning command {method}/{parms} on host {last_hostname}. Retrying on {host}.")
@@ -310,8 +362,10 @@ class WekaCluster(object):
 
         # ran out of hosts to talk to!
         if type(last_exception) == wekaapi.HttpException:
-            if last_exception.error_code == 502:  # Bad Gateway
-                raise APIException(502, "No hosts available")
+            if last_exception.code == 503:  # Bad Gateway - it indicates a leader failover in progress
+                raise APIException(503, "No hosts available; leader failover")
+
+
         raise APIException(100, "General communication failure")
 
 
