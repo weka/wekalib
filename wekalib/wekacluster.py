@@ -101,6 +101,10 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # auth file is output from "weka user login" command.
     # autohost is a bool = should we distribute the api call load among all weka servers
+    #
+    # NOTE NEW FORMAT!
+    # clusterspec is moving to be a list of strings (hostnames/ips) instead of a string of a comma-separated list!!!
+    #
     def __init__(self, clusterspec, authfile):
         # object instance global data
         self.errors = 0
@@ -118,8 +122,11 @@ class WekaCluster(object):
         self.cloud_proxy = None
         self.cloud_http_pool = None
 
-        #self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
-        self.orig_hostlist = clusterspec
+        # for backward compatibility...  will be removed in a future release.
+        if type(clusterspec) == str:
+            self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
+        else:
+            self.orig_hostlist = clusterspec
         self.clusterspec_hosts = None
         self.hosts = None
         self.dataplane_accessible = True
@@ -212,8 +219,7 @@ class WekaCluster(object):
                 self.clustersize += 1
                 if host["state"] == "ACTIVE" and host["status"] == "UP":
                     # check if it's already in the list
-                    # need a comparison of hostname to hostobj - vince
-                    # if hostname not in self.host_dict:
+                    # need a comparison of hostname to hostobj - vince  ???
                     if hostname not in self.hosts:
                         if self.dataplane_accessible:
                             host_dp_ip = host["host_ip"]
@@ -221,8 +227,9 @@ class WekaCluster(object):
                             host_dp_ip = None
 
                         try:
+                            # prefer dataplane ips...
                             log.debug(f"creating new WekaHost instance for host {hostname}")
-                            hostobj = WekaHost(hostname, self, ip=host_dp_ip) # vince issue - don't want to timeout on ip addr that we can't access
+                            hostobj = WekaHost(hostname, self, ip=host_dp_ip) # will timeout if can't access dataplane ip
                             self.hosts.insert(hostobj)
                         except Exception as exc:
                             if self.dataplane_accessible:
@@ -230,7 +237,7 @@ class WekaCluster(object):
                             else:
                                 log.error(f"Error trying to contact host {hostname}, removing from config")
                             last_exception = exc
-                            self.dataplane_accessible = False
+                            self.dataplane_accessible = False   # if the first ip fails, just assume all will fail; use hostnames instead
                     else:
                         log.debug(f"{hostname} already in list")
 
