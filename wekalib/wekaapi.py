@@ -270,7 +270,7 @@ class WekaApi():
                 log.critical(f"ConnectionRefusedError/NewConnectionError caught")
                 raise WekaApiException("Login failed")
             else:
-                log.critical(f"MaxRetryError: {exc.reason}")
+                log.debug(f"MaxRetryError: {exc.reason}")
                 #track = traceback.format_exc()
                 #print(track)
                 raise WekaApiException("host_unreachable")

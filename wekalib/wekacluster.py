@@ -131,6 +131,7 @@ class WekaHost(object):
                 self.submission_queue.task_done()
                 return  # exit thread so we don't take more requests?
             self.submission_queue.task_done()
+            time.sleep(0.001)    # yield processor to another thread
 
     # if the submission thread hasn't been started or is dead, start it
     def check_submission_thread(self):
@@ -300,7 +301,7 @@ class WekaCluster(object):
                             log.debug(f"creating new WekaHost instance for host {hostname}")
                             self.async_host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=True)
                         except Exception as exc:
-                            log.info(f"{type(exc)}")
+                            #log.info(f"{type(exc)}")
                             if self.dataplane_accessible:
                                 log.info(f"Error ({exc}) trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
                                 tryagain = True # this is really just for clarity
