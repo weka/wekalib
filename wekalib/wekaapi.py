@@ -78,13 +78,12 @@ class WekaApi():
         self._port = port
         self._path = path
         self._conn = None
-        self._timeout = timeout
+        self._timeout = urllib3.util.Timeout(total=timeout,connect=2.0,read=timeout)
         self.headers = {}
         self._tokens = tokens
-        self._in_progress = 0
 
         # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=3)
+        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
 
         log.debug(f"tokens are {self._tokens}")
         if self._tokens is not None:
@@ -272,9 +271,9 @@ class WekaApi():
                 raise WekaApiException("Login failed")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
-                track = traceback.format_exc()
-                print(track)
-                raise
+                #track = traceback.format_exc()
+                #print(track)
+                raise WekaApiException("host_unreachable")
         except Exception as exc:
             log.critical(f"{exc}")
             raise WekaApiException("Login failed")
@@ -307,14 +306,11 @@ class WekaApi():
     # re-implemented with urllib3
     def weka_api_command(self, method, parms):
 
-        with self._lock:
-            self._in_progress += 1
-            this_thread = self._in_progress
         api_exception = None
         api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
         message_id = self.unique_id()
         request = self.format_request(message_id, method, parms)
-        log.debug(f"trying {api_endpoint}; this_thread={this_thread}")
+        log.debug(f"trying {api_endpoint}")
         try:
             response = self.http_conn.request('POST', api_endpoint, headers=self.headers,
                                               body=json.dumps(request).encode('utf-8'))
@@ -334,16 +330,14 @@ class WekaApi():
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
                 api_exception = WekaApiException("MaxRetriesError")
-            with self._lock:
-                self._in_progress -= 1
             #return
+        except urllib3.exceptions.ReadTimeoutError as exc:
+            log.error(f"Read Timeout on {self}, {method}")
+            raise
         except Exception as exc:
-            log.debug(f"{exc}")
-            track = traceback.format_exc()
-            print(track)
-            with self._lock:
-                self._in_progress -= 1
+            log.debug(traceback.format_exc())
             api_exception = WekaApiException("MiscException")
+            raise
             #return
 
         if api_exception is not None:
@@ -357,66 +351,79 @@ class WekaApi():
             try:
                 self._login()
             except:
-                with self._lock:
-                    self._in_progress -= 1
                 raise
-            with self._lock:
-                self._in_progress -= 1
             return self.weka_api_command(method, parms)  # recurse - try again
 
         if response.status in (httpclient.OK, httpclient.CREATED, httpclient.ACCEPTED):
             response_object = json.loads(response.data.decode('utf-8'))
             if 'error' in response_object:
                 log.error("bad response from {}".format(self._host))
-                with self._lock:
-                    self._in_progress -= 1
                 raise WekaApiIOStopped(response_object['error']['message'])
-            with self._lock:
-                self._in_progress -= 1
-            log.debug(f"good response from {self._host}, this_thread={this_thread}, in_progress={self._in_progress}")
+            log.debug(f"good response from {self._host}")
             return self._format_response(method, response_object)
         elif response.status == httpclient.MOVED_PERMANENTLY:
             oldhost = self._host
             self._scheme, self._host, self._port, self._path = self._parse_url(response.getheader('Location'))
             log.debug("redirection: {} moved to {}".format(oldhost, self._host))
         else:
-            log.error(f"Other error on {self._host}, status={response.status}, reason={response.reason}, this_thread={this_thread}, in_progress={self._in_progress}")
-            with self._lock:
-                self._in_progress -= 1
+            log.error(f"Other error on {self._host}, status={response.status}, reason={response.reason}")
             raise HttpException(response.status, response.reason)
 
         # should only get here if MOVED_PERMANENTLY?
         resp_dict = json.loads(response.data.decode('utf-8'))
-        with self._lock:
-            self._in_progress -= 1
-        log.debug(f"exiting from {self._host}, in_progress={self._in_progress}**************************************")
+        log.debug(f"exiting from {self._host}**************************************")
         return self._format_response(method, resp_dict)
 
+# returns an absolute path to a file, if it exists, or None if not
+def find_token_file(token_file):
+    search_path = ['.', '~/.weka', '.weka']
+
+    log.info(f"looking for token file {token_file}")
+    if token_file is None:
+        return None
+
+    test_name = os.path.expanduser(token_file)  # will expand to an absolute path (starts with /) if ~ is used
+    log.debug(f"name expanded to {test_name}")
+
+    if test_name[0] == '/':
+        # either token_file was already an abssolute path, or expansuser did it's job
+        if os.path.exists(test_name):
+            return test_name
+        else:
+            # can't expand a abs path any further, and it does not exist
+            return None
+
+    # search for it in the path
+    for path in search_path:
+        base_path = os.path.expanduser(path)
+        test_name = os.path.abspath(f"{base_path}/{token_file}")
+        log.info(f"Checking for {test_name}")
+        if os.path.exists(test_name):
+            log.debug(f"Found '{test_name}'")
+            return test_name
+
+    log.debug(f"token file {token_file} not found")
+    raise WekaApiException(f"Unable to find token file '{token_file}'")
+#   end of find_token_file()
 
 # stand-alone func
 def get_tokens(token_file):
     error = False
     log.debug(f"token_file={token_file}")
     tokens = None
-    if token_file is not None:
-        path = os.path.expanduser(token_file)
-        if os.path.exists(path):
-            try:
-                with open(path) as fp:
-                    tokens = json.load(fp)
-                return tokens
-            except Exception:
-                log.critical("unable to open token file {}".format(token_file))
-                error = True
-        else:
-            error = True
-            log.error("token file {} not found".format(token_file))
 
-    if error:
-        # raise WekaApiException('warning: Could not parse {0}, ignoring file'.format(path), file=sys.stderr)
+    if token_file is None:
         return None
-    else:
+
+    try:
+        with open(token_file) as fp:
+            tokens = json.load(fp)
         return tokens
+    except Exception:
+        error = True
+        error_message = f"Unable to open/parse auth token file '{token_file}': {exc}"
+
+    raise WekaApiException(error_message)
 
 
 #   end of get_tokens()
