@@ -41,13 +41,15 @@ except ImportError:
 
 from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler, Formatter
 
+import wekalib.exceptions
+
 log = getLogger(__name__)
 
 
-class HttpException(Exception):
-    def __init__(self, error_code, error_msg):
-        self.error_code = error_code
-        self.error_msg = error_msg
+#class HttpException(Exception):
+#    def __init__(self, error_code, error_msg):
+#        self.error_code = error_code
+#        self.error_msg = error_msg
 
 
 # class JsonRpcException(Exception):
@@ -59,14 +61,14 @@ class HttpException(Exception):
 
 # pool_manager = urllib3.PoolManager(num_pools=100) # new
 
-class WekaApiIOStopped(Exception):
-    def __init__(self, message):
-        self.message = message
+#class WekaApiIOStopped(Exception):
+#    def __init__(self, message):
+#        self.message = message
 
 
-class WekaApiException(Exception):
-    def __init__(self, message):
-        self.message = message
+#class WekaApiException(Exception):
+#    def __init__(self, message):
+#        self.message = message
 
 
 class WekaApi():
@@ -82,10 +84,11 @@ class WekaApi():
         self.headers = {}
         self._tokens = tokens
 
-        # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
+        #log.debug(f"tokens are {self._tokens}")   # should never be None
 
-        log.debug(f"tokens are {self._tokens}")
+        # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
+        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)  # should not fail
+
         if self._tokens is not None:
             self.authorization = '{0} {1}'.format(self._tokens['token_type'], self._tokens['access_token'])
             self.headers["Authorization"] = self.authorization
@@ -131,63 +134,6 @@ class WekaApi():
         assert m
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
-    def _open_connection(self):
-        host_unreachable = False
-        try_again = True
-
-        if self._conn is None:  # only if we don't have a connection already
-            while try_again:
-                log.debug(
-                    f"attempting to open connection: timeout={self._timeout}, scheme={self._scheme}, host={self._host}, port={self._port}")
-                try:
-                    if self._scheme == "https":
-                        self._conn = httpclient.HTTPSConnection(self._host, self._port, timeout=self._timeout)
-                        # log.debug( f"HTTPSConnection succeeded {self.host}" )
-                    else:
-                        self._conn = httpclient.HTTPConnection(self._host, self._port, timeout=self._timeout)
-                except Exception as exc:
-                    log.critical(f"HTTPConnection {exc}: unable to open connection to {self.host}")
-                    host_unreachable = True
-
-                if not host_unreachable:
-                    try:
-                        # test a command?
-                        self._login()  # should we be doing this here?
-                        return
-                    except ssl.SSLError:
-                        # https failed, try http - http would never produce an ssl error
-                        log.debug("https failed")
-                        self._scheme = "http"
-                        try_again = True
-                    except socket.timeout:
-                        if self._scheme == "https":
-                            # https failed, try http - http would never produce an ssl error
-                            log.debug("https timed out, trying http")
-                            self._scheme = "http"
-                            try_again = True
-                        else:
-                            log.debug("http timed out")
-                            host_unreachable = True
-                            try_again = False
-                    except socket.gaierror:  # general failure
-                        log.debug("socket.gaierror")
-                        host_unreachable = True
-                        try_again = False
-                    except ConnectionRefusedError as exc:
-                        log.debug("connection refused")
-                        host_unreachable = True
-                        try_again = False
-                    except Exception as exc:  # any other failure
-                        track = traceback.format_exc()
-                        log.debug(track)
-                        log.critical(f"Login Failure:{exc}")
-                        host_unreachable = True
-                        try_again = False
-
-            if host_unreachable:
-                raise WekaApiException("unable to open connection to host " + self._host)
-
-    # end of _open_connection()
 
     # reformat data returned so it's like the weka command's -J output
     @staticmethod
@@ -235,7 +181,6 @@ class WekaApi():
 
         # ignore other method types for now.
         return raw_resp
-
     # end of _format_response()
 
     # log into the api  # assumes that you got an UNAUTHORIZED (401)
@@ -254,11 +199,14 @@ class WekaApi():
             login_request = self.format_request(login_message_id, "user_login", params)
             log.debug(f"default login with host {self._host} {login_request}")
 
+        exception_to_raise = None
+
         try:
             api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
             log.debug(f"trying {api_endpoint}")
             response = self.http_conn.request('POST', api_endpoint, headers=self.headers,
                                               body=json.dumps(login_request).encode('utf-8'))
+        # MaxRetryError occurs when we can't talk to the host at all
         except urllib3.exceptions.MaxRetryError as exc:
             # https failed, try http - http would never produce an ssl error
             if isinstance(exc.reason, urllib3.exceptions.SSLError):
@@ -266,28 +214,43 @@ class WekaApi():
                 log.debug("https failed")
                 self._scheme = "http"
                 return self._login()  # recurse
+            # NewConnectionError occurs when we can't establish a new connection... determine why
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
-                log.critical(f"ConnectionRefusedError/NewConnectionError caught")
-                raise WekaApiException("Login failed")
+                log.debug(f"***************NewConnectionError caught {type(exc.reason)}")
+                if isinstance(exc.reason, urllib3.exceptions.ConnectTimeoutError):   # timed out/didn't respond
+                    log.debug(f"########## ConnectTimeoutError {str(exc.reason)}")
+                    exception_to_raise  = wekalib.exceptions.NewConnectionError("Host unreachable")
+                elif isinstance(exc.reason, urllib3.exceptions.RequestError):   # Not sure... not resolvable?
+                    log.debug(f"########## RequestError")
+                    exception_to_raise = wekalib.exceptions.LoginError("Login failed")
+                else:
+                    exception_to_raise  = wekalib.exceptions.NameNotResolvable(self._host)
             else:
-                log.debug(f"MaxRetryError: {exc.reason}")
+                # not a new connection error, so report it
+                log.debug(f"*********MaxRetryError: {exc.url} - {exc.reason};;;;;{type(exc.reason)}")
                 #track = traceback.format_exc()
                 #print(track)
-                raise WekaApiException("host_unreachable")
+                exception_to_raise  = wekalib.exceptions.CommunicationError("Login attempt failed")
+        # misc errors
         except Exception as exc:
             log.critical(f"{exc}")
-            raise WekaApiException("Login failed")
+            exception_to_raise = wekalib.exceptions.APIError("Unknown Error occurred")
+
+        if exception_to_raise is not None:
+            raise exception_to_raise
 
         response_body = response.data.decode('utf-8')
 
-        if response.status != 200:  # default login creds/refresh failed
-            raise HttpException(response.status, response_body)
+        if response.status != 200:
+            # host rejected tokens
+            raise wekalib.exceptions.LoginError(f"Login Failure on {self._host}, ({response.status}) {response_body}")
+            #raise wekalib.exceptions.HTTPError(self._host, response.status, response_body)
 
         response_object = json.loads(response_body)
 
-        if "error" in response_object:
-            log.critical(f"Error logging into host {self._host}: {response_object['error']['message']}")
-            raise WekaApiException("Login failed")
+        #if "error" in response_object:
+        #    log.critical(f"Error logging into host {self._host}: {response_object['error']['message']}")
+        #    raise WekaApiException("Login failed")
 
         self._tokens = response_object["result"]
         if self._tokens != {}:
@@ -295,8 +258,8 @@ class WekaApi():
         else:
             self.authorization = None
             self._tokens = None
-            log.critical("Login failed")
-            raise WekaApiException("Login failed")
+            log.critical("Login failed - no tokens returned")
+            raise wekalib.exceptions.LoginError("Login failed (bad userid/password)")
 
         self.headers["Authorization"] = self.authorization
         log.debug("login to {} successful".format(self._host))
@@ -323,22 +286,20 @@ class WekaApi():
                 return self.weka_api_command(method, parms)  # recurse
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
-                api_exception = WekaApiException("NewConnectionError")
+                api_exception = wekalib.exceptions.CommunicationError(f"Cannot re-establish communication with {self._host}")
             elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
                 log.critical(f"ConnectionRefusedError caught")
-                api_exception = WekaApiException("ConnectionRefused")
+                api_exception = wekalib.exceptions.CommunicationError(f"Connection Refused by {self._host}")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
-                api_exception = WekaApiException("MaxRetriesError")
-            #return
+                api_exception = wekalib.exceptions.CommunicationError(f"MaxRetries exceeded on {self._host}: {exc.reason}")
         except urllib3.exceptions.ReadTimeoutError as exc:
-            log.error(f"Read Timeout on {self}, {method}")
-            raise
+            log.error(f"Read Timeout on {self._host}, {method}")
+            api_exception = wekalib.exceptions.TimeoutError(f"Read request timeout on {self._host}")
+            #raise
         except Exception as exc:
             log.debug(traceback.format_exc())
-            api_exception = WekaApiException("MiscException")
-            raise
-            #return
+            api_exception = wekalib.exceptions.APIError("MiscException ({exc})")
 
         if api_exception is not None:
             raise api_exception
@@ -348,17 +309,14 @@ class WekaApi():
 
         if response.status == httpclient.UNAUTHORIZED:  # not logged in?
             log.debug("need to login")
-            try:
-                self._login()
-            except:
-                raise
+            self._login()
             return self.weka_api_command(method, parms)  # recurse - try again
 
         if response.status in (httpclient.OK, httpclient.CREATED, httpclient.ACCEPTED):
             response_object = json.loads(response.data.decode('utf-8'))
             if 'error' in response_object:
                 log.error("bad response from {}".format(self._host))
-                raise WekaApiIOStopped(response_object['error']['message'])
+                raise wekalib.exceptions.IOStopped(response_object['error']['message'])
             log.debug(f"good response from {self._host}")
             return self._format_response(method, response_object)
         elif response.status == httpclient.MOVED_PERMANENTLY:
@@ -367,67 +325,12 @@ class WekaApi():
             log.debug("redirection: {} moved to {}".format(oldhost, self._host))
         else:
             log.error(f"Other error on {self._host}, status={response.status}, reason={response.reason}")
-            raise HttpException(response.status, response.reason)
+            raise wekalib.exceptions.HTTPError(self._host, response.status, response.reason)
 
         # should only get here if MOVED_PERMANENTLY?
         resp_dict = json.loads(response.data.decode('utf-8'))
         log.debug(f"exiting from {self._host}**************************************")
         return self._format_response(method, resp_dict)
-
-# returns an absolute path to a file, if it exists, or None if not
-def find_token_file(token_file):
-    search_path = ['.', '~/.weka', '.weka']
-
-    log.info(f"looking for token file {token_file}")
-    if token_file is None:
-        return None
-
-    test_name = os.path.expanduser(token_file)  # will expand to an absolute path (starts with /) if ~ is used
-    log.debug(f"name expanded to {test_name}")
-
-    if test_name[0] == '/':
-        # either token_file was already an abssolute path, or expansuser did it's job
-        if os.path.exists(test_name):
-            return test_name
-        else:
-            # can't expand a abs path any further, and it does not exist
-            return None
-
-    # search for it in the path
-    for path in search_path:
-        base_path = os.path.expanduser(path)
-        test_name = os.path.abspath(f"{base_path}/{token_file}")
-        log.info(f"Checking for {test_name}")
-        if os.path.exists(test_name):
-            log.debug(f"Found '{test_name}'")
-            return test_name
-
-    log.debug(f"token file {token_file} not found")
-    raise WekaApiException(f"Unable to find token file '{token_file}'")
-#   end of find_token_file()
-
-# stand-alone func
-def get_tokens(token_file):
-    error = False
-    log.debug(f"token_file={token_file}")
-    tokens = None
-
-    if token_file is None:
-        return None
-
-    try:
-        with open(token_file) as fp:
-            tokens = json.load(fp)
-        return tokens
-    except Exception:
-        error = True
-        error_message = f"Unable to open/parse auth token file '{token_file}': {exc}"
-
-    raise WekaApiException(error_message)
-
-
-#   end of get_tokens()
-
 
 # main is for testing
 def main():
