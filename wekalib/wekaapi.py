@@ -223,6 +223,8 @@ class WekaApi():
                 elif isinstance(exc.reason, urllib3.exceptions.RequestError):   # Not sure... not resolvable?
                     log.debug(f"########## RequestError")
                     exception_to_raise = wekalib.exceptions.LoginError("Login failed")
+                else:
+                    exception_to_raise  = wekalib.exceptions.NameNotResolvable(self._host)
             else:
                 # not a new connection error, so report it
                 log.debug(f"*********MaxRetryError: {exc.url} - {exc.reason};;;;;{type(exc.reason)}")

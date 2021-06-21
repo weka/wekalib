@@ -403,7 +403,6 @@ class WekaCluster(object):
                 log.error(f"IO Stopped on Cluster {self}?")
                 raise
             except Exception as exc:
-                log.debug(f"caught exception {exc}")
                 last_exception = exc
                 # something went wrong...  stop talking to this host from here on.  We'll try to re-establish communications later
                 log.error(
