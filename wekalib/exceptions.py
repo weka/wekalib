@@ -41,3 +41,7 @@ class TimeoutError(APIError):
 class NameNotResolvable(APIError):
     """ raised when we can't resolve a name """
     pass
+
+class SSLError(APIError):
+    """ raised when we can't resolve a name """
+    pass

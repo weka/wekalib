@@ -107,7 +107,7 @@ class WekaApi():
         self.headers['CLI'] = False
         self.headers['Client-Type'] = 'WEKA'
 
-        self._login()
+        self._login()   # will raise exception if it fails, and we'll just let it pass up to the caller
 
         log.debug("WekaApi: connected to {}".format(self._host))
 
@@ -219,9 +219,7 @@ class WekaApi():
             # https failed, try http - http would never produce an ssl error
             if isinstance(exc.reason, urllib3.exceptions.SSLError):
                 log.debug(f"SSLError detected: {exc}")
-                #log.debug("https failed")
-                self._scheme = "http"
-                return self._login()  # recurse
+                exception_to_raise = wekalib.exceptions.SSLError(exc)
             # NewConnectionError occurs when we can't establish a new connection... determine why
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.debug(f"***************NewConnectionError caught {type(exc.reason)}")
@@ -289,9 +287,7 @@ class WekaApi():
             # https failed, try http - http would never produce an ssl error
             if isinstance(exc.reason, urllib3.exceptions.SSLError):
                 log.debug(f"SSLError detected")
-                log.debug("https failed")
-                self._scheme = "http"
-                return self.weka_api_command(method, parms)  # recurse
+                api_exception = wekalib.exceptions.SSLError(exc)
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
                 api_exception = wekalib.exceptions.CommunicationError(f"Cannot re-establish communication with {self._host}")
