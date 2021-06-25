@@ -218,8 +218,8 @@ class WekaApi():
         except urllib3.exceptions.MaxRetryError as exc:
             # https failed, try http - http would never produce an ssl error
             if isinstance(exc.reason, urllib3.exceptions.SSLError):
-                log.debug(f"SSLError detected: {exc}")
-                exception_to_raise = wekalib.exceptions.SSLError(exc)
+                log.debug(f"SSLError detected: {exc.reason}")
+                exception_to_raise = wekalib.exceptions.SSLError(exc.reason)
             # NewConnectionError occurs when we can't establish a new connection... determine why
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.debug(f"***************NewConnectionError caught {type(exc.reason)}")
