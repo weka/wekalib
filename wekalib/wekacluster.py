@@ -282,7 +282,7 @@ class WekaCluster(object):
                     pass    # try next host - this one is unreachable
                 elif isinstance(exc, wekalib.exceptions.LoginError) or isinstance(exc, wekalib.exceptions.SSLError):
                     # terminal condition
-                    log.error(f"Login or SSL error")
+                    log.debug(f"Login or SSL error")
                     raise
                 log.error(f"Weka API error caught: {exc}")
             except Exception as exc:
