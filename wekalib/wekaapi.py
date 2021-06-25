@@ -72,7 +72,7 @@ log = getLogger(__name__)
 
 
 class WekaApi():
-    def __init__(self, host, scheme='http', port=14000, path='/api/v1', timeout=10, tokens=None):
+    def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=10, tokens=None, verify_cert=True):
 
         self._lock = Lock()  # make it re-entrant (thread-safe)
         self._scheme = scheme
@@ -87,7 +87,15 @@ class WekaApi():
         #log.debug(f"tokens are {self._tokens}")   # should never be None
 
         # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
-        self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)  # should not fail
+        if scheme == "http":
+            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
+        else:
+            self.http_conn = urllib3.HTTPSConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout, 
+                                                         cert_reqs='CERT_NONE', # not sure what to do with this
+                                                         assert_hostname=verify_cert)
+        if not verify_cert:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
         if self._tokens is not None:
             self.authorization = '{0} {1}'.format(self._tokens['token_type'], self._tokens['access_token'])
@@ -210,8 +218,8 @@ class WekaApi():
         except urllib3.exceptions.MaxRetryError as exc:
             # https failed, try http - http would never produce an ssl error
             if isinstance(exc.reason, urllib3.exceptions.SSLError):
-                log.debug(f"SSLError detected")
-                log.debug("https failed")
+                log.debug(f"SSLError detected: {exc}")
+                #log.debug("https failed")
                 self._scheme = "http"
                 return self._login()  # recurse
             # NewConnectionError occurs when we can't establish a new connection... determine why

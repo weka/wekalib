@@ -63,7 +63,7 @@ class WekaHost(object):
         #log.debug(f"tokens={self.cluster.apitoken}")
 
         try:
-            self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme)
+            self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme, verify_cert=cluster.verify_cert)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
@@ -210,14 +210,13 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # ---- new clusterspec is a list of hostnames/ips (remains backward compatible)
     # auth file is output from "weka user login" command, and is REQUIRED
-    def __init__(self, clusterspec, authfile):
+    def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
         self.name = ""
         self.release = None
-        # self._scheme = "https"
-        self._scheme = "http"
+        self.verify_cert = verify_cert
 
         self.cloud_url = None
         self.cloud_creds = None
@@ -225,10 +224,16 @@ class WekaCluster(object):
         self.cloud_proxy = None
         self.cloud_http_pool = None
 
+        if force_https:
+            self._scheme = "https"
+        else:
+            self._scheme = "http"
+
         if type(clusterspec) == str:
             self.orig_hostlist = clusterspec.split(",")  # takes a comma-separated list of hosts
         else:
             self.orig_hostlist = clusterspec
+
         self.host_dict = dict()         # host:WekaHost dictionary (none is intentional...)
         self.async_host_dict = dict()   # host:WekaHost dictionary
         self.dataplane_accessible = True
@@ -401,6 +406,9 @@ class WekaCluster(object):
                 api_return = host.call_api(method, parms)
             except wekalib.exceptions.IOStopped:
                 log.error(f"IO Stopped on Cluster {self}?")
+                raise
+            except wekalib.exceptions.HTTPError as exc:
+                log.error(f"host returned error response: {exc}")
                 raise
             except Exception as exc:
                 last_exception = exc
@@ -594,6 +602,7 @@ class WekaCluster(object):
 
     # reads tokens from tokenfile
     def get_tokens(self):
+        log.info(f"Using authfile {self.authfile}")
         try:
             with open(self.authfile) as fp:
                 self.apitoken = json.load(fp)
