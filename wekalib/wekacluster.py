@@ -268,6 +268,7 @@ class WekaCluster(object):
 
     def initialize_hosts(self):
         # we need *some* kind of host(s) in order to get the hosts_list below
+        last_error = None
 
         log.debug(f"Initializing hosts from original")
         # create objects for the hosts; recover from total failure
@@ -279,8 +280,11 @@ class WekaCluster(object):
                     log.debug(f"Unable to create WekaHost '{hostname}' {exc}")
                     last_error = exc
                     pass    # try next host - this one is unreachable
-                elif isinstance(exc, wekalib.exceptions.LoginError):
+                elif isinstance(exc, wekalib.exceptions.LoginError) or isinstance(exc, wekalib.exceptions.SSLError):
+                    # terminal condition
+                    log.error(f"Login or SSL error")
                     raise
+                log.error(f"Weka API error caught: {exc}")
             except Exception as exc:
                 #log.error(traceback.format_exc())
                 log.debug(f"Unable to create WekaHost '{hostname}'")
@@ -289,7 +293,10 @@ class WekaCluster(object):
 
         if len(self.host_dict) == 0:
             
-            log.debug(f"Unable to create any WekaHosts ({last_error})")
+            if last_error is None:
+                log.debug(f"Unable to create any WekaHosts (unknown error?)")
+            else:
+                log.debug(f"Unable to create any WekaHosts ({last_error})")
             raise last_error
 
         # end of initialize_hosts()
