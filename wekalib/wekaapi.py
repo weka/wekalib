@@ -72,7 +72,7 @@ log = getLogger(__name__)
 
 
 class WekaApi():
-    def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=10, tokens=None, verify_cert=True):
+    def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=30, tokens=None, verify_cert=True):
 
         self._lock = Lock()  # make it re-entrant (thread-safe)
         self._scheme = scheme
