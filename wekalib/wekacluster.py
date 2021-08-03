@@ -45,9 +45,9 @@ class WekaHost(object):
         self.cluster = cluster  # what cluster am I in?
         self.api_obj = None
         self.ip = ip
-        self._lock = Lock()
+        #self._lock = Lock()
         self.host_in_progress = 0
-        self.submission_queue = cluster.submission_queue
+        #self.submission_queue = cluster.submission_queue
         self._thread = None
         self.status = None
         self.timeout = timeout
@@ -79,6 +79,7 @@ class WekaHost(object):
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
         self._scheme = cluster._scheme
 
+        """
         if async_thread:
             # start the submission thread for this host
             log.debug(f"starting submission thread for host {self.name}")
@@ -87,6 +88,7 @@ class WekaHost(object):
             self._thread.start()
             log.debug(f"self._thread is NOW {self._thread}")
             log.debug(f"submission thread for host {self.name} started")
+        """
 
 
     # HOST api call
@@ -211,13 +213,14 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # ---- new clusterspec is a list of hostnames/ips (remains backward compatible)
     # auth file is output from "weka user login" command, and is REQUIRED
-    def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True, timeout=10.0):
+    def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True, timeout=10.0, backends_only=True):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
         self.name = ""
         self.release = None
         self.verify_cert = verify_cert
+        self.backends_only = backends_only
 
         self.cloud_url = None
         self.cloud_creds = None
@@ -237,11 +240,10 @@ class WekaCluster(object):
             self.orig_hostlist = clusterspec
 
         self.host_dict = dict()         # host:WekaHost dictionary (none is intentional...)
-        self.async_host_dict = dict()   # host:WekaHost dictionary
         self.dataplane_accessible = True
         self.last_event_timestamp = None
         self.last_get_events_time = None
-        self.submission_queue = queue.Queue()
+        #self.submission_queue = queue.Queue()
         self.outstanding_api_calls = list() 
 
         # get our auth tokens - these will raise exceptions on failure
@@ -266,7 +268,15 @@ class WekaCluster(object):
         return str(self.name)
 
     def sizeof(self):
-        return len(self.async_host_dict)
+        return len(self.host_dict)
+
+    def get_hostobj_byname(self, name):
+        if name in self.host_dict:
+            return self.host_dict[name]
+        else:
+            log.debug(f"name='{name}', {self.host_dict}")
+            return None
+            
 
     def initialize_hosts(self):
         # we need *some* kind of host(s) in order to get the hosts_list below
@@ -303,16 +313,10 @@ class WekaCluster(object):
 
         # end of initialize_hosts()
 
-
-    def hosts(self):
-        if len(self.async_host_dict) != 0:
-            return self.async_host_dict.keys()
-        else:
-            return self.host_dict.keys()
-
-
-    # set things up for async calls - get a list of cluster hosts, make sure we have WekaHosts for them all, etc
-    def initialize_async_subsystem(self):
+    def refresh(self):
+        #if len(self.host_dict) == 0:
+        if len(list(self.host_dict.keys())) == 0:
+            self.initialize_hosts()
 
         #
         # get the rest of the cluster (bring back any that had previously disappeared, or have been added)
@@ -323,65 +327,70 @@ class WekaCluster(object):
             raise
 
         # brute-force refresh of all from the cluster hosts_list - needs to be smarter
-        #self.async_host_dict = dict()
 
         self.clustersize = 0
 
         # loop through host in the host list from the cluster (api_return is a list of dicts, one per host)
         for host in api_return:
             hostname = host["hostname"]
-            if (host["auto_remove_timeout"] == None or host["mode"] == "backend") and \
-                            host["state"] == "ACTIVE" and host["status"] == "UP": # only working backend servers
-                tryagain = True     # allows us to retry if dataplane ip is inaccessible
-                while tryagain:
-                    # check if it's already in the list
-                    if hostname not in self.async_host_dict.keys():
-                        # not in the list - try to add it
-                        if self.dataplane_accessible:   # if it's accessible, use it
-                            log.debug("dataplane is accessible!")
-                            host_dp_ip = host['host_ip']
-                        else:
-                            log.debug("dataplane is NOT accessible!")
-                            host_dp_ip = None
-
-                        # save some trouble, and make sure names are resolvable
-                        nameerror = False
-                        try:
-                            socket.gethostbyname(hostname)
-                        except socket.gaierror as exc:
-                            log.critical(f"Hostname {hostname} not resolvable - is it in /etc/hosts or DNS?")
-                            nameerror = True
-                        except Exception as exc:
-                            log.critical(exc)
-                            nameerror = True
-                        if nameerror:
-                            raise wekalib.exceptions.NameNotResolvable(hostname)
-
-                        try:
-                            log.debug(f"creating new WekaHost instance for host {hostname}")
-                            self.async_host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=True)
-                        except Exception as exc:
-                            if self.dataplane_accessible:
-                                log.info(f"Error ({exc}) trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
-                                tryagain = True # this is really just for clarity
+            log.debug(f"adding host {hostname}, {host['state']}, {host['status']}, backends_only={self.backends_only}")
+            if host["state"] == "ACTIVE" and host["status"] == "UP":
+                if not self.backends_only or (host["mode"] == "backend" and self.backends_only):
+                    tryagain = True     # allows us to retry if dataplane ip is inaccessible
+                    while tryagain:
+                        # check if it's already in the list
+                        if hostname not in self.host_dict.keys():
+                            # not in the list - try to add it
+                            if self.dataplane_accessible:   # if it's accessible, use it
+                                log.debug("dataplane is accessible!")
+                                host_dp_ip = host['host_ip']
                             else:
-                                log.error(f"Error ({exc}) trying to contact host {hostname}, removing from config")
-                                tryagain = False
-                            self.dataplane_accessible = False
-                            last_exception = exc
-                        else:   # else on the try:
+                                log.debug("dataplane is NOT accessible!")
+                                host_dp_ip = None
+
+                            # save some trouble, and make sure names are resolvable
+                            nameerror = False
+                            try:
+                                socket.gethostbyname(hostname)
+                            except socket.gaierror as exc:
+                                log.critical(f"Hostname {hostname} not resolvable - is it in /etc/hosts or DNS?")
+                                nameerror = True
+                            except Exception as exc:
+                                log.critical(exc)
+                                nameerror = True
+                            if nameerror:
+                                raise wekalib.exceptions.NameNotResolvable(hostname)
+
+                            try:
+                                log.debug(f"creating new WekaHost instance for host {hostname}")
+                                self.host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=False)
+                            except Exception as exc:
+                                if self.dataplane_accessible:
+                                    log.info(f"Error ({exc}) trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
+                                    tryagain = True # this is really just for clarity
+                                else:
+                                    log.error(f"Error ({exc}) trying to contact host {hostname}, removing from config")
+                                    tryagain = False
+                                self.dataplane_accessible = False
+                                last_exception = exc
+                            else:   # else on the try:
+                                tryagain = False    # it succeeded, so no need to try again
+                        else:
+                            log.debug(f"{hostname} already in list")
+                            # Ensure the submission thread is running
                             tryagain = False    # it succeeded, so no need to try again
-                    else:
-                        log.debug(f"{hostname} already in list")
-                        # Ensure the submission thread is running
-                        self.async_host_dict[hostname].check_submission_thread()
-                        tryagain = False    # it succeeded, so no need to try again
 
 
-        log.debug(f"wekaCluster {self.name} refreshed. Cluster has {len(api_return)} members, {list(self.async_host_dict.keys())} are online")
-        if len(list(self.async_host_dict.keys())) == 0:
+        log.debug(f"wekaCluster {self.name} refreshed. Cluster has {len(api_return)} members, {list(self.host_dict.keys())} are online")
+        log.debug(f"{self.host_dict.keys()}")
+        if len(list(self.host_dict.keys())) == 0:
             # we have no hosts?
             raise wekalib.exceptions.CommunicationError("Cluster inaccessible.  Are the hosts online, and are their names resolvable?")
+
+
+
+    def hosts(self):
+        return self.host_dict.keys()
 
 
     # a good way to execute a lot of api calls quickly - queue to submission threads

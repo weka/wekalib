@@ -24,6 +24,7 @@ class HTTPError(APIError):
     def __init__(self, host, code, message):
         self.host = host
         self.code = code
+        self.message = message
         APIError.__init__(self, "%s: (%s) %s" % (host, code, message))
 
 class AuthFileError(APIError):
