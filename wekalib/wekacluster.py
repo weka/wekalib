@@ -5,7 +5,6 @@ from wekalib.wekaapi import WekaApi
 import wekalib.wekaapi as wekaapi
 from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, \
     datetime, datetime_to_lokitime, datetime_to_wekatime
-from wekalib.circular import circular_list
 import wekalib.exceptions
 
 import traceback
@@ -20,12 +19,6 @@ import socket
 
 
 log = getLogger(__name__)
-
-
-#class APIException(Exception):
-#    def __init__(self, error_code, error_msg):
-#        self.error_code = error_code
-#        self.error_msg = error_msg
 
 class APICall(object):
     def __init__(self, opaque, method, parms):
@@ -45,9 +38,7 @@ class WekaHost(object):
         self.cluster = cluster  # what cluster am I in?
         self.api_obj = None
         self.ip = ip
-        #self._lock = Lock()
         self.host_in_progress = 0
-        #self.submission_queue = cluster.submission_queue
         self._thread = None
         self.status = None
         self.timeout = timeout
@@ -79,17 +70,6 @@ class WekaHost(object):
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
         self._scheme = cluster._scheme
 
-        """
-        if async_thread:
-            # start the submission thread for this host
-            log.debug(f"starting submission thread for host {self.name}")
-            #self._thread = Thread(target=self.submission_thread, args=(self.cluster.submission_queue,), daemon=True)
-            self._thread = Thread(target=self.submission_thread, daemon=True)
-            self._thread.start()
-            log.debug(f"self._thread is NOW {self._thread}")
-            log.debug(f"submission thread for host {self.name} started")
-        """
-
 
     # HOST api call
     def call_api(self, method=None, parms={}):
@@ -107,79 +87,6 @@ class WekaHost(object):
             log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
 
-
-    # per-host asynchronous submission thread
-    def submission_thread(self, delay=0):
-        log.info(f"submission thread for host {self} starting...")
-        time.sleep(delay)  # give things time to settle down
-
-        terminate = False
-
-        while not terminate:
-            requeue = False
-            log.debug(f"submission thread for host {self.name} waiting on queue")
-
-            time.sleep(0.001)    # yield processor to another thread to make sure we give them a chance to work too
-            call = self.submission_queue.get()  # an APICall object
-
-            log.debug(f"{self.name}: dequeued request {call.method}, {call.parms}")
-            try:
-                call.result = self.call_api(call.method, call.parms)
-                call.status = "good"
-                log.debug(f"{self.name}: completed request {call.method}, {call.parms}")
-            except wekalib.exceptions.HTTPError as exc:
-                if exc.code == 502:  # Bad Gateway
-                    if call.method == "stats_show":
-                        log.error(f"{self.name}: Error 502 - resubmitting {call.method}/{call.parms['category']}/{call.parms['stat']}")
-                    else:
-                        log.error(f"{self.name}: Error 502 - resubmitting {call.method}")
-                requeue = True
-                terminate = True
-                log.error(f"Submission thread for {self} commiting suicide")
-            except wekalib.exceptions.TimeoutError as exc:
-                if call.method == "stats_show":
-                    log.error(f"{self.name}: timed out executing {call.method}/{call.parms['category']}/{call.parms['stat']}")
-                else:
-                    log.error(f"{self.name}: timed out executing {call.method}")
-                log.error(f"Submission thread for {self} commiting suicide")
-                requeue = True
-                terminate = True
-            except wekalib.exceptions.IOStopped as exc:
-                log.error("IO stopped on cluster {self}")
-                requeue = False
-                terminate = True
-            except Exception as exc:
-                log.debug(f"{self.name}: error from api {exc}")
-                log.error(f"Submission thread for {self} commiting suicide")
-                requeue = True
-                terminate = True
-
-            self.submission_queue.task_done()
-
-        if requeue:
-            self.submission_queue.put(call)  # error - resubmit
-
-        return  # exit thread so we don't take more requests; thread will be restarted if the host returns
-
-
-    # if the submission thread hasn't been started or is dead, start it (Host object)
-    def check_submission_thread(self):
-        log.debug(f"({self}) self._thread is {self._thread.name}")
-        try:
-            if self._thread is not None and not self._thread.is_alive():
-                log.debug(f"Submission thread for host {self.name} has died")
-                self._thread.join()
-                self._thread = None
-            if self._thread is None:
-                log.debug(f"({self}) starting submission thread for host {self.name}")
-                self._thread = Thread(target=self.submission_thread, 
-                        kwargs={"delay":30}, daemon=True)
-                self._thread.start()
-                log.debug(f"({self}) self._thread is NOW {self._thread.name}")
-                log.debug(f"({self}) submission thread for host {self.name} started")
-        except:
-            log.critical(traceback.format_exc())
-            raise
 
     def __str__(self):
         return self.name
@@ -243,8 +150,7 @@ class WekaCluster(object):
         self.dataplane_accessible = True
         self.last_event_timestamp = None
         self.last_get_events_time = None
-        #self.submission_queue = queue.Queue()
-        self.outstanding_api_calls = list() 
+        self.outstanding_api_calls = list()
 
         # get our auth tokens - these will raise exceptions on failure
         self.authfile = self.find_token_file(authfile)
@@ -393,21 +299,6 @@ class WekaCluster(object):
         return self.host_dict.keys()
 
 
-    # a good way to execute a lot of api calls quickly - queue to submission threads
-    def async_call_api(self, opaque, method=None, parms={}):
-        call = APICall(opaque, method, parms)
-        self.outstanding_api_calls.append(call) # save a copy so we can get results
-        self.submission_queue.put(call)     # queue it for execution
-
-
-    def wait_async(self):
-        self.submission_queue.join()        # wait for them
-        all_results = self.outstanding_api_calls # copy the list
-        self.outstanding_api_calls = list() # clear the list
-        return all_results
-
-
-    # Synchronous API call - for async calls, use async_call_api()
     # cluster-level call_api() will retry commands on another host in the cluster on failure
     def call_api(self, method=None, parms={}):
         last_exception = None
@@ -441,10 +332,6 @@ class WekaCluster(object):
 
         # ran out of hosts to talk to!
         log.debug(f"****************** last_exception is {last_exception}")
-        #if type(last_exception) == wekaapi.HttpException:
-        #    if last_exception.error_code == 502:  # Bad Gateway
-        #        raise APIException(502, "No hosts available")
-        #raise APIException(100, "General communication failure")   # raise last_exception instead?
         raise last_exception
 
 
