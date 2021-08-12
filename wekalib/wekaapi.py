@@ -45,36 +45,9 @@ import wekalib.exceptions
 
 log = getLogger(__name__)
 
-
-#class HttpException(Exception):
-#    def __init__(self, error_code, error_msg):
-#        self.error_code = error_code
-#        self.error_msg = error_msg
-
-
-# class JsonRpcException(Exception):
-#    def __init__(self, json_error):
-#        self.orig_json = json_error
-#        self.code = json_error['code']
-#        self.message = json_error['message']
-#        self.data = json_error.get('data', None)
-
-# pool_manager = urllib3.PoolManager(num_pools=100) # new
-
-#class WekaApiIOStopped(Exception):
-#    def __init__(self, message):
-#        self.message = message
-
-
-#class WekaApiException(Exception):
-#    def __init__(self, message):
-#        self.message = message
-
-
 class WekaApi():
     def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=30.0, tokens=None, verify_cert=True):
 
-        #self._lock = Lock()  # make it re-entrant (thread-safe)
         self._scheme = scheme
         self._host = host
         self._port = port
@@ -107,7 +80,7 @@ class WekaApi():
         self.headers['CLI'] = False
         self.headers['Client-Type'] = 'WEKA'
 
-        self._login()   # will raise exception if it fails, and we'll just let it pass up to the caller
+        #self._login()   # will raise exception if it fails, and we'll just let it pass up to the caller
 
         log.debug("WekaApi: connected to {}".format(self._host))
 
@@ -291,9 +264,6 @@ class WekaApi():
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
                 api_exception = wekalib.exceptions.CommunicationError(f"Cannot re-establish communication with {self._host}")
-            elif isinstance(exc.reason, urllib3.exceptions.ConnectionRefusedError):
-                log.critical(f"ConnectionRefusedError caught")
-                api_exception = wekalib.exceptions.CommunicationError(f"Connection Refused by {self._host}")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
                 api_exception = wekalib.exceptions.CommunicationError(f"MaxRetries exceeded on {self._host}: {exc.reason}")
