@@ -147,7 +147,8 @@ class WekaCluster(object):
             self.orig_hostlist = clusterspec
 
         self.host_dict = dict()         # host:WekaHost dictionary (none is intentional...)
-        self.dataplane_accessible = True
+        #self.dataplane_accessible = True
+        self.dataplane_accessible = False   # for now - dp might be congested!
         self.last_event_timestamp = None
         self.last_get_events_time = None
         self.outstanding_api_calls = list()
@@ -247,12 +248,14 @@ class WekaCluster(object):
                         # check if it's already in the list
                         if hostname not in self.host_dict.keys():
                             # not in the list - try to add it
-                            if self.dataplane_accessible:   # if it's accessible, use it
-                                log.debug("dataplane is accessible!")
-                                host_dp_ip = host['host_ip']
-                            else:
-                                log.debug("dataplane is NOT accessible!")
-                                host_dp_ip = None
+                            #if self.dataplane_accessible:   # if it's accessible, use it
+                            #    log.debug("dataplane is accessible!")
+                            #    host_dp_ip = host['host_ip']
+                            #else:
+                            #    log.debug("dataplane is NOT accessible!")
+                            #    host_dp_ip = None
+                            host_dp_ip = None       # temp/Vince
+                            self.dataplane_accessible = False
 
                             # save some trouble, and make sure names are resolvable
                             nameerror = False
