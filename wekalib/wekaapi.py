@@ -56,6 +56,7 @@ class WekaApi():
         self._timeout = urllib3.util.Timeout(total=timeout,connect=2.0,read=timeout)
         self.headers = {}
         self._tokens = tokens
+        self.STEMMode = False
 
         #log.debug(f"tokens are {self._tokens}")   # should never be None
 
@@ -80,7 +81,12 @@ class WekaApi():
         self.headers['CLI'] = False
         self.headers['Client-Type'] = 'WEKA'
 
-        #self._login()   # will raise exception if it fails, and we'll just let it pass up to the caller
+        try:
+            self._login()
+        except wekalib.exceptions.STEMModeError:
+            self.STEMMode = True
+        except Exception:
+            raise
 
         log.debug("WekaApi: connected to {}".format(self._host))
 
@@ -227,11 +233,18 @@ class WekaApi():
 
         response_object = json.loads(response_body)
 
-        #if "error" in response_object:
-        #    log.critical(f"Error logging into host {self._host}: {response_object['error']['message']}")
-        #    raise WekaApiException("Login failed")
+        if "error" in response_object:
+            if response_object['error']['code'] == -32601: # is it in STEM mode?
+                log.info(f"{self._host} appears to be in STEM mode")
+                raise wekalib.exceptions.STEMModeError(f"{self._host} appears to be in STEM mode")
+            else:
+                raise wekalib.exceptions.LoginError(
+                    f"Unexpected error loggin into {self._host}, ({response.status}) {response_body}")
 
-        self._tokens = response_object["result"]
+        try:
+            self._tokens = response_object["result"]
+        except KeyError:
+            raise wekalib.exceptions.LoginError(f"Login Failure on {self._host}, ({response.status}) {response_body}")
         if self._tokens != {}:
             self.authorization = '{0} {1}'.format(self._tokens['token_type'], self._tokens['access_token'])
         else:

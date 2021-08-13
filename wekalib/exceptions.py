@@ -15,6 +15,10 @@ class LoginError(APIError):
     """ failed to log into the host/cluster """
     pass
 
+class STEMModeError(APIError):
+    """ failed to log into the host/cluster """
+    pass
+
 class CommunicationError(APIError):
     """ an existing connection has failed (host or cluster or both?) """
     pass
