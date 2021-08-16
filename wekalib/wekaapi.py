@@ -122,6 +122,44 @@ class WekaApi():
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
 
+    """
+      {
+      "NodeId<21>": 
+        {
+            "ops": 
+            [
+              {
+                "stats": 
+                  {
+                      "OPS": 97.33333333333333,
+                      "FILEOPEN_OPS": 21.933333333333334,
+                      "READDIR_OPS": 0.11666666666666667,
+                      "FLOCK_OPS": 6.266666666666667
+                  },
+                "resolution": 60,
+                "timestamp": "2021-08-15T12:28:00Z"
+              }
+            ]
+         }
+       }
+    # changed to:
+    [
+      {
+        "category": "ops",
+        "node": "NodeId<21>",
+        "stat_type": "OPS",
+        "stat_value": 95.0333333333333314,
+        "timestamp": "2021-08-15T12:36:00Z"
+      },
+      {
+        "category": "ops",
+        "node": "NodeId<21>",
+        "stat_type": "READS",
+        "stat_value": 0,
+        "timestamp": "2021-08-15T12:36:00Z"
+      }
+    ]
+    """
     # reformat data returned so it's like the weka command's -J output
     @staticmethod
     def _format_response(method, response_obj):
@@ -129,14 +167,30 @@ class WekaApi():
         if method == "status":
             return (raw_resp)
 
-        resp_list = []
+        #log.debug(f"response is {json.dumps(raw_resp, indent=2)}")
 
-        if method == "stats_show":
-            for key, value_dict in raw_resp.items():
-                stat_dict = {"node": key, "category": list(value_dict.keys())[0]}
-                cat_dict = value_dict[stat_dict["category"]][0]
+        resp_list = []  # our output
+
+        if method == "stats_show":   # Vince - this is where it  must be going wrong
+            for nodeid, cat_dict in raw_resp.items():     # "NodeId<41>": {"ops": [{ "stats": { "OPS": 97.33333333333333,
+                for category, info_list in cat_dict.items():
+                    for item in info_list:
+                        for stat, value in item['stats'].items():  # { "stats": { "OPS": 97.33333333333333,
+                            this_stat = dict()
+                            this_stat['category'] = category
+                            this_stat['node'] = nodeid
+                            this_stat['stat_type'] = stat
+                            this_stat['stat_value'] = value
+                            this_stat['timestamp'] = item['timestamp']
+                            resp_list.append(this_stat)
+            return resp_list
+
+
+            """
+                stat_dict = {"node": key, "category": list(value_dict.keys())[0]} # {"node": "NodeId<41>", "category": "ops"}
+                cat_dict = value_dict[stat_dict["category"]][0] # kkkkkkk
                 stats = cat_dict["stats"]
-                stat_dict["stat_type"] = list(stats.keys())[0]
+                stat_dict["stat_type"] = list(stats.keys())[0]  # only taking first one - needs loop now
                 tmp = stats[stat_dict["stat_type"]]
                 if tmp == "null":
                     stat_dict["stat_value"] = 0
@@ -145,6 +199,7 @@ class WekaApi():
                 stat_dict["timestamp"] = cat_dict["timestamp"]
                 resp_list.append(stat_dict)
             return resp_list
+            """
 
         splitmethod = method.split("_")
         words = len(splitmethod)

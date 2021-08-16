@@ -81,10 +81,13 @@ class WekaHost(object):
             raise
 
         # show that we're working, and how long the calls are taking
+        """
         if method == "stats_show":
             log.info(f"elapsed time for host {self}/{method}/{parms['category']}/{parms['stat']:15}: {round(time.time() - start_time, 2)} secs")
         else:
             log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
+        """
+        log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
 
 
@@ -268,7 +271,10 @@ class WekaCluster(object):
                                 log.critical(exc)
                                 nameerror = True
                             if nameerror:
-                                raise wekalib.exceptions.NameNotResolvable(hostname)
+                                #  this is not good - don't abort the loop if one host fails dns lookup!
+                                #raise wekalib.exceptions.NameNotResolvable(hostname)
+                                log.error(f"hostname {hostname} is not resolvable, skipping")
+                                continue    # just skip it
 
                             try:
                                 log.debug(f"creating new WekaHost instance for host {hostname}")
