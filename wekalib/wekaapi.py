@@ -8,20 +8,18 @@
 
 from __future__ import division, absolute_import, print_function, unicode_literals
 
+import re
+
 try:
     from future_builtins import *
 except ImportError:
     pass
 
 import sys
-import os
 import json
 import time
 import uuid
-import socket
-import ssl
 import traceback
-from threading import Lock
 
 import urllib3
 
@@ -39,11 +37,12 @@ try:
 except ImportError:
     from urlparse import urljoin, urlparse
 
-from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler, Formatter
+from logging import getLogger, DEBUG, StreamHandler, Formatter
 
 import wekalib.exceptions
 
 log = getLogger(__name__)
+
 
 class WekaApi():
     def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=30.0, tokens=None, verify_cert=True):
@@ -53,23 +52,24 @@ class WekaApi():
         self._port = port
         self._path = path
         self._conn = None
-        self._timeout = urllib3.util.Timeout(total=timeout,connect=2.0,read=timeout)
+        self._timeout = urllib3.util.Timeout(total=timeout, connect=2.0, read=timeout)
         self.headers = {}
         self._tokens = tokens
         self.STEMMode = False
 
-        #log.debug(f"tokens are {self._tokens}")   # should never be None
+        # log.debug(f"tokens are {self._tokens}")   # should never be None
 
         # forget scheme (https/http) at this point...   notes:  maxsize means 2 connections per host, block means don't make more than 2
         if scheme == "http":
-            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout)
+            self.http_conn = urllib3.HTTPConnectionPool(host, port=port, maxsize=2, block=True, retries=1,
+                                                        timeout=self._timeout)
         else:
-            self.http_conn = urllib3.HTTPSConnectionPool(host, port=port, maxsize=2, block=True, retries=1, timeout=self._timeout, 
-                                                         cert_reqs='CERT_NONE', # not sure what to do with this
+            self.http_conn = urllib3.HTTPSConnectionPool(host, port=port, maxsize=2, block=True, retries=1,
+                                                         timeout=self._timeout,
+                                                         cert_reqs='CERT_NONE',  # not sure what to do with this
                                                          assert_hostname=verify_cert)
         if not verify_cert:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
         if self._tokens is not None:
             self.authorization = '{0} {1}'.format(self._tokens['token_type'], self._tokens['access_token'])
@@ -121,45 +121,6 @@ class WekaApi():
         assert m
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
-
-    """
-      {
-      "NodeId<21>": 
-        {
-            "ops": 
-            [
-              {
-                "stats": 
-                  {
-                      "OPS": 97.33333333333333,
-                      "FILEOPEN_OPS": 21.933333333333334,
-                      "READDIR_OPS": 0.11666666666666667,
-                      "FLOCK_OPS": 6.266666666666667
-                  },
-                "resolution": 60,
-                "timestamp": "2021-08-15T12:28:00Z"
-              }
-            ]
-         }
-       }
-    # changed to:
-    [
-      {
-        "category": "ops",
-        "node": "NodeId<21>",
-        "stat_type": "OPS",
-        "stat_value": 95.0333333333333314,
-        "timestamp": "2021-08-15T12:36:00Z"
-      },
-      {
-        "category": "ops",
-        "node": "NodeId<21>",
-        "stat_type": "READS",
-        "stat_value": 0,
-        "timestamp": "2021-08-15T12:36:00Z"
-      }
-    ]
-    """
     # reformat data returned so it's like the weka command's -J output
     @staticmethod
     def _format_response(method, response_obj):
@@ -167,12 +128,12 @@ class WekaApi():
         if method == "status":
             return (raw_resp)
 
-        #log.debug(f"response is {json.dumps(raw_resp, indent=2)}")
+        # log.debug(f"response is {json.dumps(raw_resp, indent=2)}")
 
         resp_list = []  # our output
 
-        if method == "stats_show":   # Vince - this is where it  must be going wrong
-            for nodeid, cat_dict in raw_resp.items():     # "NodeId<41>": {"ops": [{ "stats": { "OPS": 97.33333333333333,
+        if method == "stats_show":  # Vince - this is where it  must be going wrong
+            for nodeid, cat_dict in raw_resp.items():  # "NodeId<41>": {"ops": [{ "stats": { "OPS": 97.33333333333333,
                 for category, info_list in cat_dict.items():
                     for item in info_list:
                         for stat, value in item['stats'].items():  # { "stats": { "OPS": 97.33333333333333,
@@ -184,22 +145,6 @@ class WekaApi():
                             this_stat['timestamp'] = item['timestamp']
                             resp_list.append(this_stat)
             return resp_list
-
-
-            """
-                stat_dict = {"node": key, "category": list(value_dict.keys())[0]} # {"node": "NodeId<41>", "category": "ops"}
-                cat_dict = value_dict[stat_dict["category"]][0] # kkkkkkk
-                stats = cat_dict["stats"]
-                stat_dict["stat_type"] = list(stats.keys())[0]  # only taking first one - needs loop now
-                tmp = stats[stat_dict["stat_type"]]
-                if tmp == "null":
-                    stat_dict["stat_value"] = 0
-                else:
-                    stat_dict["stat_value"] = tmp
-                stat_dict["timestamp"] = cat_dict["timestamp"]
-                resp_list.append(stat_dict)
-            return resp_list
-            """
 
         splitmethod = method.split("_")
         words = len(splitmethod)
@@ -223,6 +168,7 @@ class WekaApi():
 
         # ignore other method types for now.
         return raw_resp
+
     # end of _format_response()
 
     # log into the api  # assumes that you got an UNAUTHORIZED (401)
@@ -257,20 +203,20 @@ class WekaApi():
             # NewConnectionError occurs when we can't establish a new connection... determine why
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.debug(f"***************NewConnectionError caught {type(exc.reason)}")
-                if isinstance(exc.reason, urllib3.exceptions.ConnectTimeoutError):   # timed out/didn't respond
+                if isinstance(exc.reason, urllib3.exceptions.ConnectTimeoutError):  # timed out/didn't respond
                     log.debug(f"########## ConnectTimeoutError {str(exc.reason)}")
-                    exception_to_raise  = wekalib.exceptions.NewConnectionError("Host unreachable")
-                elif isinstance(exc.reason, urllib3.exceptions.RequestError):   # Not sure... not resolvable?
+                    exception_to_raise = wekalib.exceptions.NewConnectionError("Host unreachable")
+                elif isinstance(exc.reason, urllib3.exceptions.RequestError):  # Not sure... not resolvable?
                     log.debug(f"########## RequestError")
                     exception_to_raise = wekalib.exceptions.LoginError("Login failed")
                 else:
-                    exception_to_raise  = wekalib.exceptions.NameNotResolvable(self._host)
+                    exception_to_raise = wekalib.exceptions.NameNotResolvable(self._host)
             else:
                 # not a new connection error, so report it
                 log.debug(f"*********MaxRetryError: {exc.url} - {exc.reason};;;;;{type(exc.reason)}")
-                #track = traceback.format_exc()
-                #print(track)
-                exception_to_raise  = wekalib.exceptions.CommunicationError("Login attempt failed")
+                # track = traceback.format_exc()
+                # print(track)
+                exception_to_raise = wekalib.exceptions.CommunicationError("Login attempt failed")
         # misc errors
         except Exception as exc:
             log.critical(f"{exc}")
@@ -284,12 +230,12 @@ class WekaApi():
         if response.status != 200:
             # host rejected tokens
             raise wekalib.exceptions.LoginError(f"Login Failure on {self._host}, ({response.status}) {response_body}")
-            #raise wekalib.exceptions.HTTPError(self._host, response.status, response_body)
+            # raise wekalib.exceptions.HTTPError(self._host, response.status, response_body)
 
         response_object = json.loads(response_body)
 
         if "error" in response_object:
-            if response_object['error']['code'] == -32601: # is it in STEM mode?
+            if response_object['error']['code'] == -32601:  # is it in STEM mode?
                 log.info(f"{self._host} appears to be in STEM mode")
                 raise wekalib.exceptions.STEMModeError(f"{self._host} appears to be in STEM mode")
             else:
@@ -331,14 +277,16 @@ class WekaApi():
                 api_exception = wekalib.exceptions.SSLError(exc)
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.critical(f"NewConnectionError caught")
-                api_exception = wekalib.exceptions.CommunicationError(f"Cannot re-establish communication with {self._host}")
+                api_exception = wekalib.exceptions.CommunicationError(
+                    f"Cannot re-establish communication with {self._host}")
             else:
                 log.critical(f"MaxRetryError: {exc.reason}")
-                api_exception = wekalib.exceptions.CommunicationError(f"MaxRetries exceeded on {self._host}: {exc.reason}")
+                api_exception = wekalib.exceptions.CommunicationError(
+                    f"MaxRetries exceeded on {self._host}: {exc.reason}")
         except urllib3.exceptions.ReadTimeoutError as exc:
             log.error(f"Read Timeout on {self._host}, {method}")
             api_exception = wekalib.exceptions.TimeoutError(f"Read request timeout on {self._host}")
-            #raise
+            # raise
         except Exception as exc:
             log.debug(traceback.format_exc())
             api_exception = wekalib.exceptions.APIError("MiscException ({exc})")
@@ -373,6 +321,7 @@ class WekaApi():
         resp_dict = json.loads(response.data.decode('utf-8'))
         log.debug(f"exiting from {self._host}**************************************")
         return self._format_response(method, resp_dict)
+
 
 # main is for testing
 def main():
