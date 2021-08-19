@@ -1,24 +1,19 @@
-from logging import debug, info, warning, error, critical, getLogger, DEBUG, StreamHandler
-import logging
-
-from wekalib.wekaapi import WekaApi
-import wekalib.wekaapi as wekaapi
-from wekalib.wekatime import wekatime_to_lokitime, lokitime_to_wekatime, wekatime_to_datetime, lokitime_to_datetime, \
-    datetime, datetime_to_lokitime, datetime_to_wekatime
-import wekalib.exceptions
-
-import traceback
-import urllib3
 import datetime
-import time
-from threading import Lock, Thread
 import json
-import queue
+import logging
 import os
 import socket
+import time
+from logging import getLogger, DEBUG, StreamHandler
 
+import urllib3
+
+import wekalib.exceptions
+from wekalib.wekaapi import WekaApi
+from wekalib.wekatime import wekatime_to_lokitime, datetime, datetime_to_wekatime
 
 log = getLogger(__name__)
+
 
 class APICall(object):
     def __init__(self, opaque, method, parms):
@@ -27,6 +22,7 @@ class APICall(object):
         self.parms = parms
         self.result = dict()
         self.status = "good"
+
 
 ####################################################################################################
 # Host definition
@@ -48,14 +44,15 @@ class WekaHost(object):
         log.debug(f"*********** self.ip = {self.ip}")
         # prefer to use the ip addr, if present
         if self.ip is not None:
-            connect_name = self.ip      # should be a dataplane ip
+            connect_name = self.ip  # should be a dataplane ip
         else:
-            connect_name = self.name    # aka hostname
+            connect_name = self.name  # aka hostname
 
-        #log.debug(f"tokens={self.cluster.apitoken}")
+        # log.debug(f"tokens={self.cluster.apitoken}")
 
         try:
-            self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme, verify_cert=cluster.verify_cert, timeout=10.0)
+            self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme,
+                                   verify_cert=cluster.verify_cert, timeout=10.0)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
@@ -70,7 +67,6 @@ class WekaHost(object):
         cluster._scheme = self.api_obj.scheme()  # scheme is per cluster, if one host is http, all are
         self._scheme = cluster._scheme
 
-
     # HOST api call
     def call_api(self, method=None, parms={}):
         start_time = time.time()
@@ -81,12 +77,8 @@ class WekaHost(object):
             raise
 
         # show that we're working, and how long the calls are taking
-        if method == "stats_show":
-            log.info(f"elapsed time for host {self}/{method}/{parms['category']}/{parms['stat']:15}: {round(time.time() - start_time, 2)} secs")
-        else:
-            log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
+        log.info(f"elapsed time for host {self}/{method}: {round(time.time() - start_time, 2)} secs")
         return result
-
 
     def __str__(self):
         return self.name
@@ -146,9 +138,9 @@ class WekaCluster(object):
         else:
             self.orig_hostlist = clusterspec
 
-        self.host_dict = dict()         # host:WekaHost dictionary (none is intentional...)
-        #self.dataplane_accessible = True
-        self.dataplane_accessible = False   # for now - dp might be congested!
+        self.host_dict = dict()  # host:WekaHost dictionary (none is intentional...)
+        # self.dataplane_accessible = True
+        self.dataplane_accessible = False  # for now - dp might be congested!
         self.last_event_timestamp = None
         self.last_get_events_time = None
         self.outstanding_api_calls = list()
@@ -157,7 +149,7 @@ class WekaCluster(object):
         self.authfile = self.find_token_file(authfile)
         self.get_tokens()
 
-        #log.debug(f"self.apitoken = {self.apitoken}")
+        # log.debug(f"self.apitoken = {self.apitoken}")
 
         # fetch cluster configuration
         self.initialize_hosts()
@@ -167,7 +159,6 @@ class WekaCluster(object):
         self.name = api_return['name']
         self.guid = api_return['guid']
         self.release = api_return['release']
-
 
         # ------------- end of __init__() -------------
 
@@ -183,7 +174,6 @@ class WekaCluster(object):
         else:
             log.debug(f"name='{name}', {self.host_dict}")
             return None
-            
 
     def initialize_hosts(self):
         # we need *some* kind of host(s) in order to get the hosts_list below
@@ -198,20 +188,20 @@ class WekaCluster(object):
                 if isinstance(exc, wekalib.exceptions.NewConnectionError):
                     log.debug(f"Unable to create WekaHost '{hostname}' {exc}")
                     last_error = exc
-                    pass    # try next host - this one is unreachable
+                    pass  # try next host - this one is unreachable
                 elif isinstance(exc, wekalib.exceptions.LoginError) or isinstance(exc, wekalib.exceptions.SSLError):
                     # terminal condition
                     log.debug(f"Login or SSL error")
                     raise
                 log.error(f"Weka API error caught: {exc}")
             except Exception as exc:
-                #log.error(traceback.format_exc())
+                # log.error(traceback.format_exc())
                 log.debug(f"Unable to create WekaHost '{hostname}'")
                 last_error = exc
-                #raise
+                # raise
 
         if len(self.host_dict) == 0:
-            
+
             if last_error is None:
                 log.debug(f"Unable to create any WekaHosts (unknown error?)")
             else:
@@ -221,7 +211,6 @@ class WekaCluster(object):
         # end of initialize_hosts()
 
     def refresh(self):
-        #if len(self.host_dict) == 0:
         if len(list(self.host_dict.keys())) == 0:
             self.initialize_hosts()
 
@@ -229,7 +218,7 @@ class WekaCluster(object):
         # get the rest of the cluster (bring back any that had previously disappeared, or have been added)
         #
         try:
-            api_return = self.call_api(method="hosts_list", parms={})   # list of hosts from cluster
+            api_return = self.call_api(method="hosts_list", parms={})  # list of hosts from cluster
         except:
             raise
 
@@ -243,18 +232,18 @@ class WekaCluster(object):
             log.debug(f"adding host {hostname}, {host['state']}, {host['status']}, backends_only={self.backends_only}")
             if host["state"] == "ACTIVE" and host["status"] == "UP":
                 if not self.backends_only or (host["mode"] == "backend" and self.backends_only):
-                    tryagain = True     # allows us to retry if dataplane ip is inaccessible
+                    tryagain = True  # allows us to retry if dataplane ip is inaccessible
                     while tryagain:
                         # check if it's already in the list
                         if hostname not in self.host_dict.keys():
                             # not in the list - try to add it
-                            #if self.dataplane_accessible:   # if it's accessible, use it
+                            # if self.dataplane_accessible:   # if it's accessible, use it
                             #    log.debug("dataplane is accessible!")
                             #    host_dp_ip = host['host_ip']
-                            #else:
+                            # else:
                             #    log.debug("dataplane is NOT accessible!")
                             #    host_dp_ip = None
-                            host_dp_ip = None       # temp/Vince
+                            host_dp_ip = None  # temp/Vince
                             self.dataplane_accessible = False
 
                             # save some trouble, and make sure names are resolvable
@@ -268,39 +257,41 @@ class WekaCluster(object):
                                 log.critical(exc)
                                 nameerror = True
                             if nameerror:
-                                raise wekalib.exceptions.NameNotResolvable(hostname)
+                                #  this is not good - don't abort the loop if one host fails dns lookup!
+                                # raise wekalib.exceptions.NameNotResolvable(hostname)
+                                log.error(f"hostname {hostname} is not resolvable, skipping")
+                                continue  # just skip it
 
                             try:
                                 log.debug(f"creating new WekaHost instance for host {hostname}")
                                 self.host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=False)
                             except Exception as exc:
                                 if self.dataplane_accessible:
-                                    log.info(f"Error ({exc}) trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
-                                    tryagain = True # this is really just for clarity
+                                    log.info(
+                                        f"Error ({exc}) trying to contact host on dataplane interface: {host_dp_ip}, using hostnames")
+                                    tryagain = True  # this is really just for clarity
                                 else:
                                     log.error(f"Error ({exc}) trying to contact host {hostname}, removing from config")
                                     tryagain = False
                                 self.dataplane_accessible = False
                                 last_exception = exc
-                            else:   # else on the try:
-                                tryagain = False    # it succeeded, so no need to try again
+                            else:  # else on the try:
+                                tryagain = False  # it succeeded, so no need to try again
                         else:
                             log.debug(f"{hostname} already in list")
                             # Ensure the submission thread is running
-                            tryagain = False    # it succeeded, so no need to try again
+                            tryagain = False  # it succeeded, so no need to try again
 
-
-        log.debug(f"wekaCluster {self.name} refreshed. Cluster has {len(api_return)} members, {list(self.host_dict.keys())} are online")
+        log.debug(
+            f"wekaCluster {self.name} refreshed. Cluster has {len(api_return)} members, {list(self.host_dict.keys())} are online")
         log.debug(f"{self.host_dict.keys()}")
         if len(list(self.host_dict.keys())) == 0:
             # we have no hosts?
-            raise wekalib.exceptions.CommunicationError("Cluster inaccessible.  Are the hosts online, and are their names resolvable?")
-
-
+            raise wekalib.exceptions.CommunicationError(
+                "Cluster inaccessible.  Are the hosts online, and are their names resolvable?")
 
     def hosts(self):
         return self.host_dict.keys()
-
 
     # cluster-level call_api() will retry commands on another host in the cluster on failure
     def call_api(self, method=None, parms={}):
@@ -314,7 +305,7 @@ class WekaCluster(object):
 
             try:
                 log.debug(
-                        f"calling Weka API on cluster {self}, host {host}, method {method}")
+                    f"calling Weka API on cluster {self}, host {host}, method {method}")
                 api_return = host.call_api(method, parms)
             except wekalib.exceptions.IOStopped:
                 log.error(f"IO Stopped on Cluster {self}?")
@@ -328,7 +319,7 @@ class WekaCluster(object):
                 log.error(
                     f"cluster={self}, error {exc} spawning command {method}/{parms} on host {hostname}. Retrying on next host.")
                 # print(traceback.format_exc())
-                continue    # move on to next host
+                continue  # move on to next host
 
             # success!  Return the data
             return api_return
@@ -336,7 +327,6 @@ class WekaCluster(object):
         # ran out of hosts to talk to!
         log.debug(f"****************** last_exception is {last_exception}")
         raise last_exception
-
 
         # ------------- end of call_api() -------------
 
@@ -394,13 +384,13 @@ class WekaCluster(object):
         try:
             log.debug(f"calling request {url} {fields} {headers}")
             resp = self.cloud_http_pool.request('GET', url, fields=fields, headers=headers)
-            #log.debug(f"request call complete")
+            # log.debug(f"request call complete")
         except Exception as exc:
             log.critical(f"GET request failure: {exc}")
             return []
 
-        #log.debug(f"weka home response status: {resp.status}")
-        #log.debug(f"weka home response data: {resp.data}")
+        # log.debug(f"weka home response status: {resp.status}")
+        # log.debug(f"weka home response data: {resp.data}")
 
         if resp.status != 200:
             log.error(f"BAD weka home response status: {resp.status}")
@@ -448,9 +438,9 @@ class WekaCluster(object):
             self.cloud_http_pool = urllib3.PoolManager()
             url = urllib3.util.parse_url(self.cloud_url)
             log.debug(f"no proxy: url.scheme is: {url.scheme}")
-            #if url.scheme == "https":   # weka home cloud is https, but weka home local is http!
-            #self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
-            #else:
+            # if url.scheme == "https":   # weka home cloud is https, but weka home local is http!
+            # self.cloud_http_pool = urllib3.HTTPSConnectionPool(url.host, retries=3, timeout=5)
+            # else:
             #    self.cloud_http_pool = urllib3.HTTPConnectionPool(url.host, retries=3, timeout=5)
 
     def get_events(self):
@@ -474,7 +464,6 @@ class WekaCluster(object):
         for event in weka_events:
             event_dict[wekatime_to_lokitime(event["timestamp"])] = event
         return event_dict
-
 
     # returns an absolute path to a file, if it exists, or None if not
     def find_token_file(self, token_file):
@@ -506,6 +495,7 @@ class WekaCluster(object):
 
         log.debug(f"token file {token_file} not found")
         raise wekalib.exceptions.AuthFileError(f"Unable to find token file '{token_file}'")
+
     #   end of find_token_file()
 
     # reads tokens from tokenfile
@@ -514,7 +504,7 @@ class WekaCluster(object):
         try:
             with open(self.authfile) as fp:
                 self.apitoken = json.load(fp)
-            #log.debug(f"self.apitoken = {self.apitoken}")
+            # log.debug(f"self.apitoken = {self.apitoken}")
             return
         except Exception as exc:
             errors = wekalib.exceptions.AuthFileError(f"Unable to parse auth token file '{self.authfile}': {exc}")

@@ -2,12 +2,8 @@ from setuptools import setup
 
 setup(
     name='Wekalib',
-    version='1.3.1',
-
-    packages=['wekalib'],
-    url='https://github.com/weka/wekalib',
-    license='GNU',
+    version='1.3.2',
     author='Vincent Fleming',
     author_email='vince@weka.io',
-    description='Weka API library'
+    description='Weka JRPC API library'
 )
