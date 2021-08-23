@@ -10,7 +10,7 @@ import urllib3
 
 import wekalib.exceptions
 from wekalib.wekaapi import WekaApi
-from wekalib.wekatime import wekatime_to_lokitime, datetime, datetime_to_wekatime
+from wekalib.wekatime import wekatime_to_lokitime, datetime_to_wekatime
 
 log = getLogger(__name__)
 
