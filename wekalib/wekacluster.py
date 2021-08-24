@@ -52,7 +52,7 @@ class WekaHost(object):
 
         try:
             self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme,
-                                   verify_cert=cluster.verify_cert, timeout=10.0)
+                                   verify_cert=cluster.verify_cert, timeout=2.0)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
@@ -253,13 +253,17 @@ class WekaCluster(object):
                             except socket.gaierror as exc:
                                 log.critical(f"Hostname {hostname} not resolvable - is it in /etc/hosts or DNS?")
                                 nameerror = True
+                                tryagain = False  # it succeeded, so no need to try again
                             except Exception as exc:
                                 log.critical(exc)
                                 nameerror = True
+                                tryagain = False  # it succeeded, so no need to try again
+                                continue  # just skip it
                             if nameerror:
                                 #  this is not good - don't abort the loop if one host fails dns lookup!
                                 # raise wekalib.exceptions.NameNotResolvable(hostname)
                                 log.error(f"hostname {hostname} is not resolvable, skipping")
+                                tryagain = False  # it succeeded, so no need to try again
                                 continue  # just skip it
 
                             try:
