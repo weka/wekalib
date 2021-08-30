@@ -132,7 +132,7 @@ class WekaApi():
 
         resp_list = []  # our output
 
-        if method == "stats_show":  # Vince - this is where it  must be going wrong
+        if method == "stats_show":
             for nodeid, cat_dict in raw_resp.items():  # "NodeId<41>": {"ops": [{ "stats": { "OPS": 97.33333333333333,
                 for category, info_list in cat_dict.items():
                     for item in info_list:

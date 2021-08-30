@@ -52,7 +52,7 @@ class WekaHost(object):
 
         try:
             self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme,
-                                   verify_cert=cluster.verify_cert, timeout=2.0)
+                                   verify_cert=cluster.verify_cert, timeout=timeout)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
