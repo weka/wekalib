@@ -150,7 +150,7 @@ class WekaApi():
         words = len(splitmethod)
 
         # does it end in "_list"?
-        if method != "alerts_list":
+        if method != "alerts_list" and method != "directory_quota_list":
             if splitmethod[words - 1] == "list" or method == "filesystems_get_capacity":
                 for key, value_dict in raw_resp.items():
                     newkey = key.split("I")[0].lower() + "_id"
