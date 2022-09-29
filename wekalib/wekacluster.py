@@ -52,7 +52,7 @@ class WekaHost(object):
 
         try:
             self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme,
-                                   verify_cert=cluster.verify_cert, timeout=timeout)
+                                   verify_cert=cluster.verify_cert, timeout=timeout, old_format=cluster.old_format)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
@@ -112,7 +112,8 @@ class WekaCluster(object):
     # clusterspec format is "host1,host2,host3,host4" (can be ip addrs, even only one of the cluster hosts)
     # ---- new clusterspec is a list of hostnames/ips (remains backward compatible)
     # auth file is output from "weka user login" command, and is REQUIRED
-    def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True, timeout=10.0, backends_only=True):
+    def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True,
+                 timeout=10.0, backends_only=True, old_format=True):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
@@ -120,6 +121,7 @@ class WekaCluster(object):
         self.release = None
         self.verify_cert = verify_cert
         self.backends_only = backends_only
+        self.old_format = old_format
 
         self.cloud_url = None
         self.cloud_creds = None
@@ -183,7 +185,7 @@ class WekaCluster(object):
         # create objects for the hosts; recover from total failure
         for hostname in self.orig_hostlist:
             try:
-                self.host_dict[hostname] = WekaHost(hostname, self)
+                self.host_dict[hostname] = WekaHost(hostname, self, timeout=self.timeout)
             except wekalib.exceptions.APIError as exc:
                 if isinstance(exc, wekalib.exceptions.NewConnectionError):
                     log.debug(f"Unable to create WekaHost '{hostname}' {exc}")
