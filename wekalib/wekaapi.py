@@ -45,7 +45,8 @@ log = getLogger(__name__)
 
 
 class WekaApi():
-    def __init__(self, host, scheme='https', port=14000, path='/api/v1', timeout=30.0, tokens=None, verify_cert=True):
+    def __init__(self, host, scheme='https', port=14000, path='/api/v1',
+                 timeout=30.0, tokens=None, verify_cert=True, old_format=True):
 
         self._scheme = scheme
         self._host = host
@@ -53,8 +54,10 @@ class WekaApi():
         self._path = path
         self._conn = None
         self._timeout = urllib3.util.Timeout(total=timeout, connect=2.0, read=timeout)
-        self.headers = {}
         self._tokens = tokens
+        self.old_format = old_format
+
+        self.headers = {}
         self.STEMMode = False
 
         # log.debug(f"tokens are {self._tokens}")   # should never be None
@@ -122,11 +125,11 @@ class WekaApi():
         return scheme, m.group(1), m.group(2) or default_port, m.group(3) or default_path
 
     # reformat data returned so it's like the weka command's -J output
-    @staticmethod
-    def _format_response(method, response_obj):
+    def _format_response(self, method, response_obj):
         raw_resp = response_obj["result"]
-        if method == "status":
-            return (raw_resp)
+
+        if method == "status" or not self.old_format:
+            return raw_resp
 
         # log.debug(f"response is {json.dumps(raw_resp, indent=2)}")
 
