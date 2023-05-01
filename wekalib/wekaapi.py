@@ -330,6 +330,8 @@ class WekaApi():
         log.debug(f"exiting from {self._host}**************************************")
         return self._format_response(method, resp_dict)
 
+    def get_tokens(self):
+        return self._tokens
 
 # main is for testing
 def main():

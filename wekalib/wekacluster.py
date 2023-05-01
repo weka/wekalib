@@ -524,6 +524,7 @@ class WekaCluster(object):
     def save_tokens(self):
         log.info(f"Saving authfile {self.authfile}")
         try:
+            self.apitoken = list(self.host_dict.values())[0].api_obj.get_tokens()
             with open(self.authfile, "w") as fp:
                 json.dump(self.apitoken, fp, indent=4)
             return
