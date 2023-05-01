@@ -295,6 +295,7 @@ class WekaCluster(object):
             # we have no hosts?
             raise wekalib.exceptions.CommunicationError(
                 "Cluster inaccessible.  Are the hosts online, and are their names resolvable?")
+        self.save_tokens()
 
     def hosts(self):
         return self.host_dict.keys()
@@ -483,7 +484,7 @@ class WekaCluster(object):
         log.debug(f"name expanded to {test_name}")
 
         if test_name[0] == '/':
-            # either token_file was already an abssolute path, or expansuser did it's job
+            # either token_file was already an absolute path, or expansuser did it's job
             if os.path.exists(test_name):
                 return test_name
             else:
@@ -517,6 +518,18 @@ class WekaCluster(object):
 
         raise errors
     #   end of get_tokens()
+
+
+    # save the tokens (updates the refresh token so it doesn't expire - when/how often to call?
+    def save_tokens(self):
+        log.info(f"Saving authfile {self.authfile}")
+        try:
+            with open(self.authfile, "w") as fp:
+                json.dump(self.apitoken, fp, indent=4)
+            return
+        # file not found should substitute a default location!
+        except Exception as exc:
+            errors = wekalib.exceptions.AuthFileError(f"Unable to save auth token file '{self.authfile}': {exc}")
 
 
 if __name__ == "__main__":

@@ -85,7 +85,7 @@ class WekaApi():
         self.headers['Client-Type'] = 'WEKA'
 
         try:
-            self._login()
+            self.login()
         except wekalib.exceptions.STEMModeError:
             self.STEMMode = True
         except Exception:
@@ -175,29 +175,33 @@ class WekaApi():
 
     # end of _format_response()
 
-    # log into the api  # assumes that you got an UNAUTHORIZED (401)
-    def _login(self):
+    # log into the api
+    def login(self, user='admin', password='admin', org='root'):
         login_message_id = self.unique_id()
         log.debug("logging in")
 
+        # this part sets up the api call... actual call below
         if self.authorization is not None:  # maybe should see if _tokens != None also?
-            # try to refresh the auth since we have prior authorization
+            # try to refresh the auth since we have prior authorization (assumes the access token failed)
             params = dict(refresh_token=self._tokens["refresh_token"])
             login_request = self.format_request(login_message_id, "user_refresh_token", params)
             log.debug("reauthorizing with host {}".format(self._host))
         else:
-            # try default login info - we have no tokens.
-            params = dict(username="admin", password="admin")
-            login_request = self.format_request(login_message_id, "user_login", params)
-            log.debug(f"default login with host {self._host} {login_request}")
+            # try user/pass login info - we have no tokens.
+            params = dict(username=user, password=password, org=org)
+            login_request = self.format_request(login_message_id, "userlogin", params)
+            log.debug(f"password login with host {self._host} {login_request}")
 
         exception_to_raise = None
 
+        api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
+        log.debug(f"trying {api_endpoint}")
+
+        # actual api call
         try:
-            api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
-            log.debug(f"trying {api_endpoint}")
             response = self.http_conn.request('POST', api_endpoint, headers=self.headers,
                                               body=json.dumps(login_request).encode('utf-8'))
+
         # MaxRetryError occurs when we can't talk to the host at all
         except urllib3.exceptions.MaxRetryError as exc:
             # https failed, try http - http would never produce an ssl error
@@ -244,7 +248,7 @@ class WekaApi():
                 raise wekalib.exceptions.STEMModeError(f"{self._host} appears to be in STEM mode")
             else:
                 raise wekalib.exceptions.LoginError(
-                    f"Unexpected error loggin into {self._host}, ({response.status}) {response_body}")
+                    f"Unexpected error logging into {self._host}, ({response.status}) {response_body}")
 
         try:
             self._tokens = response_object["result"]
@@ -261,7 +265,7 @@ class WekaApi():
         self.headers["Authorization"] = self.authorization
         log.debug("login to {} successful".format(self._host))
 
-        # end of _login()
+        # end of login()
 
     # re-implemented with urllib3
     def weka_api_command(self, method, parms):
@@ -303,7 +307,7 @@ class WekaApi():
 
         if response.status == httpclient.UNAUTHORIZED:  # not logged in?
             log.debug("need to login")
-            self._login()
+            self.login()
             return self.weka_api_command(method, parms)  # recurse - try again
 
         if response.status in (httpclient.OK, httpclient.CREATED, httpclient.ACCEPTED):
