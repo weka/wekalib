@@ -232,7 +232,7 @@ class WekaCluster(object):
         for host in api_return:
             hostname = host["hostname"]
             log.debug(f"adding host {hostname}, {host['state']}, {host['status']}, backends_only={self.backends_only}")
-            if host["state"] == "ACTIVE" and host["status"] == "UP":
+            if host["state"] == "ACTIVE" and host["status"] == "UP" and host["mgmt_port"] == 14000:
                 if not self.backends_only or (host["mode"] == "backend" and self.backends_only):
                     tryagain = True  # allows us to retry if dataplane ip is inaccessible
                     while tryagain:
@@ -307,19 +307,19 @@ class WekaCluster(object):
         # select a host to talk to (first one is fine), cycle through until one works or cluster is down
         for hostname, host in self.host_dict.items():
 
-            # api_return = None
             log.debug(f"host is {host}")
 
             try:
                 log.debug(
                     f"calling Weka API on cluster {self}, host {host}, method {method}")
                 api_return = host.call_api(method, parms)
+                return api_return
             except wekalib.exceptions.IOStopped:
                 log.error(f"IO Stopped on Cluster {self}?")
                 raise
-            except wekalib.exceptions.HTTPError as exc:
-                log.error(f"host returned error response: {exc}")
-                raise
+            #except wekalib.exceptions.HTTPError as exc:
+            #    log.error(f"host returned error response: {exc}")
+            #    raise
             except Exception as exc:
                 last_exception = exc
                 # something went wrong...  stop talking to this host from here on.  We'll try to re-establish communications later
@@ -328,8 +328,8 @@ class WekaCluster(object):
                 # print(traceback.format_exc())
                 continue  # move on to next host
 
-            # success!  Return the data
-            return api_return
+            # success?  Return the data
+            #return api_return
 
         # ran out of hosts to talk to!
         log.debug(f"****************** last_exception is {last_exception}")
@@ -511,13 +511,20 @@ class WekaCluster(object):
         try:
             with open(self.authfile) as fp:
                 self.apitoken = json.load(fp)
-            # log.debug(f"self.apitoken = {self.apitoken}")
-            return
+            if self.validate_auth_tokens():
+                log.debug(f"tokens validated")
+                return
+            return  # not supposed to be reachable
         except Exception as exc:
             errors = wekalib.exceptions.AuthFileError(f"Unable to parse auth token file '{self.authfile}': {exc}")
 
         raise errors
     #   end of get_tokens()
+    def validate_auth_tokens(self):
+        if ("access_token" not in self.apitoken
+                or "refresh_token" not in self.apitoken
+                or "token_type" not in self.apitoken):
+            raise Exception("Invalid auth tokens")
 
 
     # save the tokens (updates the refresh token so it doesn't expire - when/how often to call?
@@ -544,10 +551,12 @@ if __name__ == "__main__":
     logger.addHandler(console_handler)
 
     print("creating cluster")
-    cluster = WekaCluster("172.20.0.128,172.20.0.129,172.20.0.135")
+    cluster = WekaCluster("172.29.0.62,172.29.0.64,172.29.0.65", "auth-token.json")
 
     print("cluster created")
 
     print(cluster)
 
     print(cluster.call_api(method="status", parms={}))
+
+    cluster.refresh()
