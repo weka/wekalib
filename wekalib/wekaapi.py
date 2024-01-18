@@ -152,9 +152,14 @@ class WekaApi():
         splitmethod = method.split("_")
         words = len(splitmethod)
 
+        exclude_list = ["alerts_list",
+                        "directory_quota_list",
+                        "obs_s3_list",
+                        "obs_capacities_list"]
+
         # does it end in "_list"?
         # bruce - exclude obs_s3_list even though it ends in list.  Result is a list, not a dict.
-        if method != "alerts_list" and method != "directory_quota_list" and method != "obs_s3_list":
+        if method not in exclude_list:
             if splitmethod[words - 1] == "list" or method == "filesystems_get_capacity":
                 for key, value_dict in raw_resp.items():
                     newkey = key.split("I")[0].lower() + "_id"
