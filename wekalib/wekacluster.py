@@ -188,7 +188,7 @@ class WekaCluster(object):
         # create objects for the hosts; recover from total failure
         for hostname in self.orig_hostlist:
             try:
-                self.host_dict[hostname] = WekaHost(hostname, self, timeout=self.timeout)
+                self.host_dict[hostname] = WekaHost(hostname, self, timeout=self.timeout, self.mgmt_port)
             except wekalib.exceptions.APIError as exc:
                 if isinstance(exc, wekalib.exceptions.NewConnectionError):
                     log.debug(f"Unable to create WekaHost '{hostname}' {exc}")
@@ -273,7 +273,8 @@ class WekaCluster(object):
 
                             try:
                                 log.debug(f"creating new WekaHost instance for host {hostname}")
-                                self.host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=False)
+                                self.host_dict[hostname] = WekaHost(hostname, self, ip=host_dp_ip, async_thread=False,
+                                                                    mgmt_port=self.mgmt_port)
                             except Exception as exc:
                                 if self.dataplane_accessible:
                                     log.info(
