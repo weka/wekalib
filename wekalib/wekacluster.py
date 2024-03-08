@@ -29,7 +29,7 @@ class APICall(object):
 ####################################################################################################
 class WekaHost(object):
 
-    def __init__(self, hostname, cluster, ip=None, async_thread=False, timeout=10.0):
+    def __init__(self, hostname, cluster, ip=None, async_thread=False, timeout=10.0, mgmt_port=14000):
         self.name = hostname  # what's my name?
         self.cluster = cluster  # what cluster am I in?
         self.api_obj = None
@@ -38,6 +38,7 @@ class WekaHost(object):
         self._thread = None
         self.status = None
         self.timeout = timeout
+        self.mgmt_port = mgmt_port
 
         # log.debug(f"authfile={tokenfile}")
 
@@ -52,7 +53,8 @@ class WekaHost(object):
 
         try:
             self.api_obj = WekaApi(connect_name, tokens=self.cluster.apitoken, scheme=cluster._scheme,
-                                   verify_cert=cluster.verify_cert, timeout=timeout, old_format=cluster.old_format)
+                                   verify_cert=cluster.verify_cert, timeout=timeout, old_format=cluster.old_format,
+                                   port=self.mgmt_port)
         except wekalib.exceptions.APIError as exc:
             log.debug(f"APIError caught {exc}")
             raise
@@ -113,7 +115,7 @@ class WekaCluster(object):
     # ---- new clusterspec is a list of hostnames/ips (remains backward compatible)
     # auth file is output from "weka user login" command, and is REQUIRED
     def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True,
-                 timeout=10.0, backends_only=True, old_format=True):
+                 timeout=10.0, backends_only=True, old_format=True, mgmt_port=14000):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
@@ -122,6 +124,7 @@ class WekaCluster(object):
         self.verify_cert = verify_cert
         self.backends_only = backends_only
         self.old_format = old_format
+        self.mgmt_port=mgmt_port
 
         self.cloud_url = None
         self.cloud_creds = None
@@ -232,7 +235,7 @@ class WekaCluster(object):
         for host in api_return:
             hostname = host["hostname"]
             log.debug(f"adding host {hostname}, {host['state']}, {host['status']}, backends_only={self.backends_only}")
-            if host["state"] == "ACTIVE" and host["status"] == "UP" and host["mgmt_port"] == 14000:
+            if host["state"] == "ACTIVE" and host["status"] == "UP" and host["mgmt_port"] == self.mgmt_port:
                 if not self.backends_only or (host["mode"] == "backend" and self.backends_only):
                     tryagain = True  # allows us to retry if dataplane ip is inaccessible
                     while tryagain:
