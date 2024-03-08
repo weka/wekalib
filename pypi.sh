@@ -1,1 +1,2 @@
-python setup.py register sdist upload
+#python setup.py register sdist upload
+twine upload dist/*
