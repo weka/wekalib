@@ -115,7 +115,7 @@ class WekaCluster(object):
     # ---- new clusterspec is a list of hostnames/ips (remains backward compatible)
     # auth file is output from "weka user login" command, and is REQUIRED
     def __init__(self, clusterspec, authfile, force_https=False, verify_cert=True,
-                 timeout=10.0, backends_only=True, old_format=True, mgmt_port=14000):
+                 timeout=10.0, backends_only=True, old_format=False, mgmt_port=14000):
         # object instance global data
         self.errors = 0
         self.clustersize = 0
@@ -194,7 +194,9 @@ class WekaCluster(object):
                     log.debug(f"Unable to create WekaHost '{hostname}' {exc}")
                     last_error = exc
                     pass  # try next host - this one is unreachable
-                elif isinstance(exc, wekalib.exceptions.LoginError) or isinstance(exc, wekalib.exceptions.SSLError):
+                elif (isinstance(exc, wekalib.exceptions.LoginError) or
+                            isinstance(exc, wekalib.exceptions.SSLError) or
+                            isinstance(exc, wekalib.exceptions.CommunicationError)):
                     # terminal condition
                     log.debug(f"Login or SSL error")
                     raise
@@ -232,7 +234,7 @@ class WekaCluster(object):
         self.clustersize = 0
 
         # loop through host in the host list from the cluster (api_return is a list of dicts, one per host)
-        for host in api_return:
+        for host in api_return.values():
             hostname = host["hostname"]
             log.debug(f"adding host {hostname}, {host['state']}, {host['status']}, backends_only={self.backends_only}")
             if host["state"] == "ACTIVE" and host["status"] == "UP" and host["mgmt_port"] == self.mgmt_port:
@@ -529,6 +531,7 @@ class WekaCluster(object):
                 or "refresh_token" not in self.apitoken
                 or "token_type" not in self.apitoken):
             raise Exception("Invalid auth tokens")
+        return True
 
 
     # save the tokens (updates the refresh token so it doesn't expire - when/how often to call?
@@ -555,8 +558,13 @@ if __name__ == "__main__":
     logger.addHandler(console_handler)
 
     print("creating cluster")
-    cluster = WekaCluster("172.29.0.62,172.29.0.64,172.29.0.65", "auth-token.json")
-
+    #cluster = WekaCluster("weka4065", "auth-token.json", old_format=False, mgmt_port=14000)
+    try:
+        cluster = WekaCluster("172.29.0.63", "auth-token.json", old_format=False, mgmt_port=14000)
+    except Exception as exc:
+        log.critical(f"Unable to create cluster: {exc}")
+        import sys
+        sys.exit(1)
     print("cluster created")
 
     print(cluster)
