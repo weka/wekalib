@@ -216,20 +216,20 @@ class WekaApi():
             # NewConnectionError occurs when we can't establish a new connection... determine why
             elif isinstance(exc.reason, urllib3.exceptions.NewConnectionError):
                 log.debug(f"***************NewConnectionError caught {type(exc.reason)}")
-                if isinstance(exc.reason, urllib3.exceptions.ConnectTimeoutError):  # timed out/didn't respond
-                    log.debug(f"########## ConnectTimeoutError {str(exc.reason)}")
-                    exception_to_raise = wekalib.exceptions.NewConnectionError("Host unreachable")
-                elif isinstance(exc.reason, urllib3.exceptions.RequestError):  # Not sure... not resolvable?
-                    log.debug(f"########## RequestError")
-                    exception_to_raise = wekalib.exceptions.LoginError("Login failed")
-                else:
-                    exception_to_raise = wekalib.exceptions.NameNotResolvable(self._host)
+            elif isinstance(exc.reason, urllib3.exceptions.ConnectTimeoutError):  # timed out/didn't respond
+                log.debug(f"########## ConnectTimeoutError {str(exc.reason)}")
+                exception_to_raise = wekalib.exceptions.NewConnectionError("Host unreachable")
+            elif isinstance(exc.reason, urllib3.exceptions.RequestError):  # Not sure... not resolvable?
+                log.debug(f"########## RequestError")
+                exception_to_raise = wekalib.exceptions.LoginError("Login failed")
             else:
-                # not a new connection error, so report it
-                log.debug(f"*********MaxRetryError: {exc.url} - {exc.reason};;;;;{type(exc.reason)}")
-                # track = traceback.format_exc()
-                # print(track)
-                exception_to_raise = wekalib.exceptions.CommunicationError("Login attempt failed")
+                exception_to_raise = wekalib.exceptions.NameNotResolvable(self._host)
+            #else:
+            #    # not a new connection error, so report it
+            #    log.debug(f"*********MaxRetryError: {exc.url} - {exc.reason};;;;;{type(exc.reason)}")
+            #    # track = traceback.format_exc()
+            #    # print(track)
+            #    exception_to_raise = wekalib.exceptions.CommunicationError("Login attempt failed")
         # misc errors
         except Exception as exc:
             log.critical(f"{exc}")
