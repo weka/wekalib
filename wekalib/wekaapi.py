@@ -273,8 +273,9 @@ class WekaApi():
         # end of login()
 
     # re-implemented with urllib3
-    def weka_api_command(self, method, parms):
-
+    def weka_api_command(self, method, parms=None):
+        if parms is None:
+            parms = {}
         api_exception = None
         api_endpoint = f"{self._scheme}://{self._host}:{self._port}{self._path}"
         message_id = self.unique_id()

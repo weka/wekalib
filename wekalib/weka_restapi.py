@@ -5,11 +5,12 @@ http = "http://"
 
 
 class WekaAPIClient:
-    def __init__(self, hostname):
+    def __init__(self, hostname, port=14000):
         self.hostname = hostname
+        self.port = port
         self.api_key = None
         self.token_type = None
-        self.base_url = f"http://{self.hostname}:14000/api/v2"
+        self.base_url = f"http://{self.hostname}:{self.port}/api/v2"
         self.weka_version = None
         self.mcb = False
 
@@ -61,20 +62,18 @@ class WekaAPIClient:
 
     # add this method to return a list of hosts/base containers
     def get_base_containers(self):
-        hosts = self.get_containers()
-        hostlist = hosts['data']
-        for host in hostlist:
-            # get rid of clients and down hosts
-            # print(f"host = {host['hostname']}, mode= {host['mode']}, state={host['state']}, status={host['status']}")
-            if host['mode'] != 'backend' or host["state"] != "ACTIVE" or host["status"] != "UP":
-                # print(f"   removing {host['hostname']}")
-                hostlist.remove(host)
-            else:
-                # it's online, but not the container we want
-                if host["mgmt_port"] != 14000:
-                    self.mcb = True     # if there are containers not on 14000, it's MCB
-                    hostlist.remove(host)  # we only want one per server
-        # print(hostlist)
+        containers = self.get_containers()
+        hostlist = containers['data']
+
+        #List comprehension to test for mode, state, status or mgmt port
+        hostlist[:] = [host for host in hostlist
+                           if (host['mode'] == 'backend'
+                               and host['state'] == 'ACTIVE'
+                               and host['status'] == 'UP'
+                               and host['mgmt_port'] == self.port
+                               )
+                      ]
+
         return hostlist
 
 
@@ -119,7 +118,7 @@ def main():
     logger.addHandler(console_handler)
 
     # Connect to Weka server
-    weka = WekaAPIClient('localhost')
+    weka = WekaAPIClient('localhost',13000)
     weka.login('admin', 'Admin777')
 
     # Get Cluster Status
